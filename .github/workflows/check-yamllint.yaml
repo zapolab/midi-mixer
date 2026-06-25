@@ -1,0 +1,20 @@
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.ref }}-${{ github.workflow }}
+
+jobs:
+  check-yamllint:
+    name: Lint yaml files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the repository
+        uses: actions/checkout@v6.0.2
+      - name: Run yamllint
+        run: yamllint .
+
+name: check-yamllint.yaml
+
+"on":
+  pull_request:
+    branches:
+      - main

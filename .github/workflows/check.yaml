@@ -1,0 +1,38 @@
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.ref }}-${{ github.workflow }}
+
+jobs:
+  check:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the repository
+        uses: actions/checkout@v6.0.2
+      - id: cargo-target-restore
+        name: Restore the cargo target dir
+        uses: actions/cache/restore@v5.0.5
+        with:
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ github.run_number }}
+          path: ${{ github.workspace }}/target
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-
+      - name: Run formatter
+        run: cargo fmt --check
+      - name: Run linter
+        run: cargo clippy
+      - name: Run types and syntax check
+        run: cargo check
+      - if: always()
+        name: Save the cargo target dir
+        uses: actions/cache/save@v5.0.5
+        with:
+          key: ${{ steps.cargo-target-restore.outputs.cache-primary-key }}
+          path: ${{ github.workspace }}/target
+
+name: check.yaml
+
+"on":
+  pull_request:
+    branches:
+      - main
