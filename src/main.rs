@@ -172,7 +172,7 @@ async fn main(spawner: Spawner) {
 
             let filtered_pot0 = ema_pot0 as u16;
             let filtered_pot1 = ema_pot1 as u16;
-            // TODO: hardware low pass filter. For now there is a little bit of noise
+            // TODO: hardware low pass filter. For now there is a little bit of noise and filtered value reach only 4094
 
             let data = PotReadings {
                 filtered_pot0,
