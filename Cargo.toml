@@ -35,6 +35,7 @@ portable-atomic = { version = "1.5", features = ["critical-section"] }
 log = "0.4"
 rand = { version = "0.9.0", default-features = false }
 embedded-graphics = "0.8.1"
+ssd1306 = "0.10.0"
 
 [profile.release]
 # Enable generation of debug symbols even on release builds
