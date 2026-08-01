@@ -17,7 +17,8 @@ use embedded_graphics::{
     mono_font::{MonoTextStyleBuilder, ascii::FONT_6X10},
     pixelcolor::BinaryColor,
     prelude::*,
-    text::Text,
+    primitives::Rectangle,
+    text::{Baseline, Text},
 };
 use gpio::{Level, Output};
 use heapless::String;
@@ -95,41 +96,46 @@ async fn display_manager_task(
         let cmd = DISPLAY_CHANNEL.receive().await;
         match cmd {
             DisplayCmd::DrawPot(data) => {
-                display.clear_buffer();
+                display
+                    .fill_solid(
+                        &Rectangle::new(Point::new(0, 0), Size::new(128, 20)),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
 
                 // 8-char buffer for u16
                 let mut buf: String<8> = String::new();
 
                 // Write pot0
                 write!(buf, "{}", data.filtered_pot0).unwrap();
-                Text::new(buf.as_str(), Point::new(0, 16), text_style)
+                Text::with_baseline(buf.as_str(), Point::new(0, 0), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
                 write!(buf, "{} %", data.percentage_pot0).unwrap();
-                Text::new(buf.as_str(), Point::new(32, 16), text_style)
+                Text::with_baseline(buf.as_str(), Point::new(32, 0), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
                 write!(buf, "{} MIDI", data.midi_range_pot0).unwrap();
-                Text::new(buf.as_str(), Point::new(64, 16), text_style)
+                Text::with_baseline(buf.as_str(), Point::new(64, 0), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
 
                 // Write pot1
                 buf.clear();
                 write!(buf, "{}", data.filtered_pot1).unwrap();
-                Text::new(buf.as_str(), Point::new(0, 26), text_style)
+                Text::with_baseline(buf.as_str(), Point::new(0, 10), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
                 write!(buf, "{} %", data.percentage_pot1).unwrap();
-                Text::new(buf.as_str(), Point::new(32, 26), text_style)
+                Text::with_baseline(buf.as_str(), Point::new(32, 10), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
                 write!(buf, "{} MIDI", data.midi_range_pot1).unwrap();
-                Text::new(buf.as_str(), Point::new(64, 26), text_style)
+                Text::with_baseline(buf.as_str(), Point::new(64, 10), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
             }
