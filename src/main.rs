@@ -147,7 +147,22 @@ async fn display_manager_task(
                     .draw(&mut display)
                     .unwrap();
             }
-            DisplayCmd::DrawSelectedDeck(data) => {}
+            DisplayCmd::DrawSelectedDeck(data) => {
+                display
+                    .fill_solid(
+                        &Rectangle::new(Point::new(0, 20), Size::new(6, 10)),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
+
+                // 1-char buffer
+                let mut buf: String<1> = String::new();
+
+                write!(buf, "{}", data).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(0, 20), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+            }
         }
         display.flush().unwrap();
     }
