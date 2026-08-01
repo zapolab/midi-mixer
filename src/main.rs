@@ -103,7 +103,7 @@ async fn display_manager_task(
                     )
                     .unwrap();
 
-                // 8-char buffer for u16
+                // 8-char buffer
                 let mut buf: String<8> = String::new();
 
                 // Write pot0
