@@ -1,13 +1,19 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::Write;
+use core::{
+    fmt::Write,
+    sync::atomic::{AtomicU8, Ordering},
+};
 use defmt::{info, warn};
 use embassy_executor::Spawner;
 use embassy_rp::{
     adc::{Adc, Channel, Config as AdcConfig, InterruptHandler as AdcInterruptHandler},
     bind_interrupts,
-    gpio::{self, Pull},
+    gpio::{
+        self, Input,
+        Pull::{self, Up},
+    },
     i2c::{Async, Config as I2cConfig, I2c, InterruptHandler as I2cInterruptHandler},
     peripherals::I2C0,
 };
@@ -47,6 +53,8 @@ enum DisplayCmd {
 
 static DISPLAY_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, DisplayCmd, 8> =
     embassy_sync::channel::Channel::new();
+
+static SELECTED_DECK: AtomicU8 = AtomicU8::new(0);
 
 bind_interrupts!(
     struct Irqs {
@@ -145,6 +153,34 @@ async fn display_manager_task(
     }
 }
 
+/// Async task reading deck switch changes
+#[embassy_executor::task]
+async fn deck_switch_task(mut switch: Input<'static>) {
+    if switch.is_high() {
+        SELECTED_DECK.store(1, Ordering::Relaxed);
+    }
+
+    // Send update to channel
+    let data = SELECTED_DECK.load(Ordering::Relaxed);
+    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawSelectedDeck(data)) {
+        warn!("Channel full!");
+    }
+
+    loop {
+        switch.wait_for_any_edge().await;
+        if switch.is_high() {
+            SELECTED_DECK.store(1, Ordering::Relaxed);
+        } else {
+            SELECTED_DECK.store(0, Ordering::Relaxed);
+        }
+
+        let data = SELECTED_DECK.load(Ordering::Relaxed);
+        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawSelectedDeck(data)) {
+            warn!("Channel full!");
+        }
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
@@ -159,10 +195,12 @@ async fn main(spawner: Spawner) {
 
     // Pins declaration
     let mut _led = Output::new(p.PIN_25, Level::Low);
+    let switch = Input::new(p.PIN_22, Pull::Up);
     let mut pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let mut pot1 = Channel::new_pin(p.PIN_27, Pull::None);
 
     spawner.spawn(display_manager_task(display).unwrap());
+    spawner.spawn(deck_switch_task(switch).unwrap());
 
     // Inizialize EMA filter and other variables for ADC
     let init_pot0 = read_adc_averaged(&mut adc, &mut pot0).await;
