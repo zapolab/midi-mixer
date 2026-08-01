@@ -1,13 +1,16 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::Write;
+use core::{
+    fmt::Write,
+    sync::atomic::{AtomicU8, Ordering},
+};
 use defmt::{info, warn};
 use embassy_executor::Spawner;
 use embassy_rp::{
     adc::{Adc, Channel, Config as AdcConfig, InterruptHandler as AdcInterruptHandler},
     bind_interrupts,
-    gpio::{self, Pull},
+    gpio::{self, Input, Pull},
     i2c::{Async, Config as I2cConfig, I2c, InterruptHandler as I2cInterruptHandler},
     peripherals::I2C0,
 };
@@ -17,12 +20,14 @@ use embedded_graphics::{
     mono_font::{MonoTextStyleBuilder, ascii::FONT_6X10},
     pixelcolor::BinaryColor,
     prelude::*,
-    text::Text,
+    primitives::Rectangle,
+    text::{Baseline, Text},
 };
 use gpio::{Level, Output};
 use heapless::String;
 use ssd1306::{
-    I2CDisplayInterface, Ssd1306, prelude::*, rotation::DisplayRotation, size::DisplaySize128x64,
+    I2CDisplayInterface, Ssd1306, mode::BufferedGraphicsMode, prelude::*,
+    rotation::DisplayRotation, size::DisplaySize128x64,
 };
 use {defmt_rtt as _, panic_probe as _};
 
@@ -37,9 +42,16 @@ struct PotReadings {
     midi_range_pot1: u8,
 }
 
-/// Display channel, capacity 2
-static DISPLAY_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, PotReadings, 2> =
+/// Struct for potentiometer read values
+enum DisplayCmd {
+    DrawPot(PotReadings),
+    DrawSelectedDeck(u8),
+}
+
+static DISPLAY_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, DisplayCmd, 8> =
     embassy_sync::channel::Channel::new();
+
+static SELECTED_DECK: AtomicU8 = AtomicU8::new(0);
 
 bind_interrupts!(
     struct Irqs {
@@ -69,68 +81,115 @@ fn filtered_to_midi_range(raw: u16) -> u8 {
     ((raw as u32 * 127) / 4095).min(127) as u8
 }
 
-/// Async task displaying pots values when they change
+/// Async task managing display writing requests
 #[embassy_executor::task]
-async fn task_display_pot(i2c: I2c<'static, I2C0, Async>) {
-    let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-        .into_buffered_graphics_mode();
-    display.init().unwrap();
-
+async fn display_manager_task(
+    mut display: Ssd1306<
+        I2CInterface<I2c<'static, I2C0, Async>>,
+        DisplaySize128x64,
+        BufferedGraphicsMode<DisplaySize128x64>,
+    >,
+) {
     let text_style = MonoTextStyleBuilder::new()
         .font(&FONT_6X10)
         .text_color(BinaryColor::On)
         .build();
 
-    display.clear_buffer();
-    display.flush().unwrap();
-
     info!("Display ready.");
 
     loop {
-        // Wait for data
-        let data = DISPLAY_CHANNEL.receive().await;
+        let cmd = DISPLAY_CHANNEL.receive().await;
+        match cmd {
+            DisplayCmd::DrawPot(data) => {
+                display
+                    .fill_solid(
+                        &Rectangle::new(Point::new(0, 0), Size::new(128, 20)),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
 
-        display.clear_buffer();
+                // 8-char buffer
+                let mut buf: String<8> = String::new();
 
-        // 8-char buffer for u16
-        let mut buf: String<8> = String::new();
+                // Write pot0
+                write!(buf, "{}", data.filtered_pot0).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(0, 0), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+                buf.clear();
+                write!(buf, "{} %", data.percentage_pot0).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(32, 0), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+                buf.clear();
+                write!(buf, "{} MIDI", data.midi_range_pot0).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(64, 0), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
 
-        // Write pot0
-        write!(buf, "{}", data.filtered_pot0).unwrap();
-        Text::new(buf.as_str(), Point::new(0, 16), text_style)
-            .draw(&mut display)
-            .unwrap();
-        buf.clear();
-        write!(buf, "{} %", data.percentage_pot0).unwrap();
-        Text::new(buf.as_str(), Point::new(32, 16), text_style)
-            .draw(&mut display)
-            .unwrap();
-        buf.clear();
-        write!(buf, "{} MIDI", data.midi_range_pot0).unwrap();
-        Text::new(buf.as_str(), Point::new(64, 16), text_style)
-            .draw(&mut display)
-            .unwrap();
+                // Write pot1
+                buf.clear();
+                write!(buf, "{}", data.filtered_pot1).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(0, 10), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+                buf.clear();
+                write!(buf, "{} %", data.percentage_pot1).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(32, 10), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+                buf.clear();
+                write!(buf, "{} MIDI", data.midi_range_pot1).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(64, 10), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+            }
+            DisplayCmd::DrawSelectedDeck(data) => {
+                display
+                    .fill_solid(
+                        &Rectangle::new(Point::new(0, 20), Size::new(6, 10)),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
 
-        // Write pot1
-        buf.clear();
-        write!(buf, "{}", data.filtered_pot1).unwrap();
-        Text::new(buf.as_str(), Point::new(0, 26), text_style)
-            .draw(&mut display)
-            .unwrap();
-        buf.clear();
-        write!(buf, "{} %", data.percentage_pot1).unwrap();
-        Text::new(buf.as_str(), Point::new(32, 26), text_style)
-            .draw(&mut display)
-            .unwrap();
-        buf.clear();
-        write!(buf, "{} MIDI", data.midi_range_pot1).unwrap();
-        Text::new(buf.as_str(), Point::new(64, 26), text_style)
-            .draw(&mut display)
-            .unwrap();
+                // 1-char buffer
+                let mut buf: String<1> = String::new();
 
-        // Actually display changes
+                write!(buf, "{}", data).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(0, 20), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+            }
+        }
         display.flush().unwrap();
+    }
+}
+
+/// Async task reading deck switch changes
+#[embassy_executor::task]
+async fn deck_switch_task(mut switch: Input<'static>) {
+    if switch.is_high() {
+        SELECTED_DECK.store(1, Ordering::Relaxed);
+    }
+
+    // Send update to channel
+    let data = SELECTED_DECK.load(Ordering::Relaxed);
+    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawSelectedDeck(data)) {
+        warn!("Channel full!");
+    }
+
+    loop {
+        switch.wait_for_any_edge().await;
+        if switch.is_high() {
+            SELECTED_DECK.store(1, Ordering::Relaxed);
+        } else {
+            SELECTED_DECK.store(0, Ordering::Relaxed);
+        }
+
+        let data = SELECTED_DECK.load(Ordering::Relaxed);
+        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawSelectedDeck(data)) {
+            warn!("Channel full!");
+        }
     }
 }
 
@@ -140,12 +199,20 @@ async fn main(spawner: Spawner) {
     let mut adc = Adc::new(p.ADC, Irqs, AdcConfig::default());
     let i2c = I2c::new_async(p.I2C0, p.PIN_17, p.PIN_16, Irqs, I2cConfig::default());
 
+    // Display initialization
+    let interface = I2CDisplayInterface::new(i2c);
+    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+        .into_buffered_graphics_mode();
+    display.init().unwrap();
+
     // Pins declaration
     let mut _led = Output::new(p.PIN_25, Level::Low);
+    let switch = Input::new(p.PIN_22, Pull::Up);
     let mut pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let mut pot1 = Channel::new_pin(p.PIN_27, Pull::None);
 
-    spawner.spawn(task_display_pot(i2c).unwrap());
+    spawner.spawn(display_manager_task(display).unwrap());
+    spawner.spawn(deck_switch_task(switch).unwrap());
 
     // Inizialize EMA filter and other variables for ADC
     let init_pot0 = read_adc_averaged(&mut adc, &mut pot0).await;
@@ -184,7 +251,7 @@ async fn main(spawner: Spawner) {
             };
 
             // Send latest data to channel
-            if let Err(_) = DISPLAY_CHANNEL.try_send(data) {
+            if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPot(data)) {
                 warn!("Channel full!");
             }
         }
