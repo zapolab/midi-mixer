@@ -219,6 +219,27 @@ async fn display_manager_task(
                     .draw(&mut display)
                     .unwrap();
             }
+            DisplayCmd::DrawCount(data) => {
+                display
+                    .fill_solid(
+                        &Rectangle::new(Point::new(12, 20), Size::new(24, 10)),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
+
+                // 8-char buffer
+                let mut buf: String<8> = String::new();
+
+                if data == 1 {
+                    write!(buf, "UP").unwrap();
+                } else {
+                    write!(buf, "DOWN").unwrap();
+                }
+
+                Text::with_baseline(buf.as_str(), Point::new(12, 20), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+            }
         }
         display.flush().unwrap();
     }
