@@ -10,10 +10,7 @@ use embassy_executor::Spawner;
 use embassy_rp::{
     adc::{Adc, Channel, Config as AdcConfig, InterruptHandler as AdcInterruptHandler},
     bind_interrupts,
-    gpio::{
-        self, Input,
-        Pull::{self, Up},
-    },
+    gpio::{self, Input, Pull},
     i2c::{Async, Config as I2cConfig, I2c, InterruptHandler as I2cInterruptHandler},
     peripherals::I2C0,
 };
