@@ -8,11 +8,18 @@ use core::{
 use defmt::{info, warn};
 use embassy_executor::Spawner;
 use embassy_rp::{
+    Peri,
     adc::{Adc, Channel, Config as AdcConfig, InterruptHandler as AdcInterruptHandler},
     bind_interrupts,
     gpio::{self, Input, Pull},
     i2c::{Async, Config as I2cConfig, I2c, InterruptHandler as I2cInterruptHandler},
-    peripherals::I2C0,
+    peripherals::{I2C0, PIO0},
+    pio::{
+        Common, Config as PioConfig, Direction as PioDirection, FifoJoin,
+        InterruptHandler as PioInterruptHandler, Pio, PioPin, ShiftDirection, StateMachine,
+        program,
+    },
+    pio_programs::clock_divider::calculate_pio_clock_divider,
 };
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_time::{Duration, Timer};
@@ -48,6 +55,17 @@ enum DisplayCmd {
     DrawSelectedDeck(u8),
 }
 
+// Encoder lines are sampled every ~5 µs
+const ENCODER_PIO_CLOCK_HZ: u32 = 1_000_000;
+const QUARTER_STEPS_PER_DETENT: i8 = 2;
+// Used for ignore bounces on direction jumps
+const QUADRATURE_TABLE: [i8; 16] = [
+    0, 1, -1, 0, //
+    -1, 0, 0, 1, //
+    1, 0, 0, -1, //
+    0, -1, 1, 0, //
+];
+
 static DISPLAY_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, DisplayCmd, 8> =
     embassy_sync::channel::Channel::new();
 
@@ -57,8 +75,48 @@ bind_interrupts!(
     struct Irqs {
         ADC_IRQ_FIFO => AdcInterruptHandler;
         I2C0_IRQ => I2cInterruptHandler<I2C0>;
+        PIO0_IRQ_0 => PioInterruptHandler<PIO0>;
     }
 );
+
+/// Starts the state machine for the encoder
+// Logic by AI
+fn init_encoder(
+    common: &mut Common<'static, PIO0>,
+    mut sm: StateMachine<'static, PIO0, 0>,
+    pin_clk: Peri<'static, impl PioPin>,
+    pin_dt: Peri<'static, impl PioPin>,
+) -> StateMachine<'static, PIO0, 0> {
+    let prg = program::pio_asm!(
+        "start:",
+        "    mov isr, null",
+        "    in pins, 2",
+        "    mov x, isr",
+        "    jmp x!=y, changed",
+        "    jmp start",
+        "changed:",
+        "    mov y, x",
+        "    push",
+    );
+    let prg = common.load_program(&prg.program);
+
+    let mut pin_clk = common.make_pio_pin(pin_clk);
+    let mut pin_dt = common.make_pio_pin(pin_dt);
+    pin_clk.set_pull(Pull::Up);
+    pin_dt.set_pull(Pull::Up);
+    sm.set_pin_dirs(PioDirection::In, &[&pin_clk, &pin_dt]);
+
+    let mut cfg = PioConfig::default();
+    cfg.set_in_pins(&[&pin_clk, &pin_dt]);
+    cfg.fifo_join = FifoJoin::RxOnly;
+    cfg.shift_in.direction = ShiftDirection::Left;
+    cfg.clock_divider = calculate_pio_clock_divider(ENCODER_PIO_CLOCK_HZ);
+    cfg.use_program(&prg, &[]);
+
+    sm.set_config(&cfg);
+    sm.set_enable(true);
+    sm
+}
 
 /// Read 16 values and return the average
 async fn read_adc_averaged(adc: &mut Adc<'_, embassy_rp::adc::Async>, ch: &mut Channel<'_>) -> u16 {
