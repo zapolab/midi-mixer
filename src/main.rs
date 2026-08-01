@@ -53,6 +53,7 @@ struct PotReadings {
 enum DisplayCmd {
     DrawPot(PotReadings),
     DrawSelectedDeck(u8),
+    DrawCount(u8),
 }
 
 // Encoder lines are sampled every ~5 µs
@@ -251,6 +252,38 @@ async fn deck_switch_task(mut switch: Input<'static>) {
     }
 }
 
+/// Async task reading the rotary encoder
+// Logic by AI
+#[embassy_executor::task]
+async fn encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
+    let mut state = (sm.rx().wait_pull().await & 0b11) as u8;
+    let mut quarter: i8 = 0;
+
+    info!("Encoder ready.");
+
+    loop {
+        let new_state = (sm.rx().wait_pull().await & 0b11) as u8;
+
+        let delta = QUADRATURE_TABLE[((state << 2) | new_state) as usize];
+        state = new_state;
+
+        if delta == 0 {
+            continue;
+        }
+        quarter += delta;
+
+        if quarter.abs() < QUARTER_STEPS_PER_DETENT {
+            continue;
+        }
+        let data = if quarter > 0 { 1 } else { 0 };
+        quarter = 0;
+
+        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawCount(data)) {
+            warn!("Channel full!");
+        }
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
@@ -263,14 +296,21 @@ async fn main(spawner: Spawner) {
         .into_buffered_graphics_mode();
     display.init().unwrap();
 
+    // Pio declaration
+    let Pio {
+        mut common, sm0, ..
+    } = Pio::new(p.PIO0, Irqs);
+
     // Pins declaration
     let mut _led = Output::new(p.PIN_25, Level::Low);
     let switch = Input::new(p.PIN_22, Pull::Up);
     let mut pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let mut pot1 = Channel::new_pin(p.PIN_27, Pull::None);
+    let encoder = init_encoder(&mut common, sm0, p.PIN_2, p.PIN_3);
 
     spawner.spawn(display_manager_task(display).unwrap());
     spawner.spawn(deck_switch_task(switch).unwrap());
+    spawner.spawn(encoder_task(encoder).unwrap());
 
     // Inizialize EMA filter and other variables for ADC
     let init_pot0 = read_adc_averaged(&mut adc, &mut pot0).await;
