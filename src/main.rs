@@ -8,11 +8,18 @@ use core::{
 use defmt::{info, warn};
 use embassy_executor::Spawner;
 use embassy_rp::{
+    Peri,
     adc::{Adc, Channel, Config as AdcConfig, InterruptHandler as AdcInterruptHandler},
     bind_interrupts,
     gpio::{self, Input, Pull},
     i2c::{Async, Config as I2cConfig, I2c, InterruptHandler as I2cInterruptHandler},
-    peripherals::I2C0,
+    peripherals::{I2C0, PIO0},
+    pio::{
+        Common, Config as PioConfig, Direction as PioDirection, FifoJoin,
+        InterruptHandler as PioInterruptHandler, Pio, PioPin, ShiftDirection, StateMachine,
+        program,
+    },
+    pio_programs::clock_divider::calculate_pio_clock_divider,
 };
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_time::{Duration, Timer};
@@ -46,7 +53,19 @@ struct PotReadings {
 enum DisplayCmd {
     DrawPot(PotReadings),
     DrawSelectedDeck(u8),
+    DrawCount(u8),
 }
+
+// Encoder lines are sampled every ~5 µs
+const ENCODER_PIO_CLOCK_HZ: u32 = 1_000_000;
+const QUARTER_STEPS_PER_DETENT: i8 = 2;
+// Used for ignore bounces on direction jumps
+const QUADRATURE_TABLE: [i8; 16] = [
+    0, 1, -1, 0, //
+    -1, 0, 0, 1, //
+    1, 0, 0, -1, //
+    0, -1, 1, 0, //
+];
 
 static DISPLAY_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, DisplayCmd, 8> =
     embassy_sync::channel::Channel::new();
@@ -57,8 +76,48 @@ bind_interrupts!(
     struct Irqs {
         ADC_IRQ_FIFO => AdcInterruptHandler;
         I2C0_IRQ => I2cInterruptHandler<I2C0>;
+        PIO0_IRQ_0 => PioInterruptHandler<PIO0>;
     }
 );
+
+/// Starts the state machine for the encoder
+// Logic by AI
+fn init_encoder(
+    common: &mut Common<'static, PIO0>,
+    mut sm: StateMachine<'static, PIO0, 0>,
+    pin_clk: Peri<'static, impl PioPin>,
+    pin_dt: Peri<'static, impl PioPin>,
+) -> StateMachine<'static, PIO0, 0> {
+    let prg = program::pio_asm!(
+        "start:",
+        "    mov isr, null",
+        "    in pins, 2",
+        "    mov x, isr",
+        "    jmp x!=y, changed",
+        "    jmp start",
+        "changed:",
+        "    mov y, x",
+        "    push",
+    );
+    let prg = common.load_program(&prg.program);
+
+    let mut pin_clk = common.make_pio_pin(pin_clk);
+    let mut pin_dt = common.make_pio_pin(pin_dt);
+    pin_clk.set_pull(Pull::Up);
+    pin_dt.set_pull(Pull::Up);
+    sm.set_pin_dirs(PioDirection::In, &[&pin_clk, &pin_dt]);
+
+    let mut cfg = PioConfig::default();
+    cfg.set_in_pins(&[&pin_clk, &pin_dt]);
+    cfg.fifo_join = FifoJoin::RxOnly;
+    cfg.shift_in.direction = ShiftDirection::Left;
+    cfg.clock_divider = calculate_pio_clock_divider(ENCODER_PIO_CLOCK_HZ);
+    cfg.use_program(&prg, &[]);
+
+    sm.set_config(&cfg);
+    sm.set_enable(true);
+    sm
+}
 
 /// Read 16 values and return the average
 async fn read_adc_averaged(adc: &mut Adc<'_, embassy_rp::adc::Async>, ch: &mut Channel<'_>) -> u16 {
@@ -160,6 +219,27 @@ async fn display_manager_task(
                     .draw(&mut display)
                     .unwrap();
             }
+            DisplayCmd::DrawCount(data) => {
+                display
+                    .fill_solid(
+                        &Rectangle::new(Point::new(12, 20), Size::new(24, 10)),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
+
+                // 8-char buffer
+                let mut buf: String<8> = String::new();
+
+                if data == 1 {
+                    write!(buf, "UP").unwrap();
+                } else {
+                    write!(buf, "DOWN").unwrap();
+                }
+
+                Text::with_baseline(buf.as_str(), Point::new(12, 20), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+            }
         }
         display.flush().unwrap();
     }
@@ -193,6 +273,38 @@ async fn deck_switch_task(mut switch: Input<'static>) {
     }
 }
 
+/// Async task reading the rotary encoder
+// Logic by AI
+#[embassy_executor::task]
+async fn encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
+    let mut state = (sm.rx().wait_pull().await & 0b11) as u8;
+    let mut quarter: i8 = 0;
+
+    info!("Encoder ready.");
+
+    loop {
+        let new_state = (sm.rx().wait_pull().await & 0b11) as u8;
+
+        let delta = QUADRATURE_TABLE[((state << 2) | new_state) as usize];
+        state = new_state;
+
+        if delta == 0 {
+            continue;
+        }
+        quarter += delta;
+
+        if quarter.abs() < QUARTER_STEPS_PER_DETENT {
+            continue;
+        }
+        let data = if quarter > 0 { 1 } else { 0 };
+        quarter = 0;
+
+        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawCount(data)) {
+            warn!("Channel full!");
+        }
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
@@ -205,14 +317,21 @@ async fn main(spawner: Spawner) {
         .into_buffered_graphics_mode();
     display.init().unwrap();
 
+    // Pio declaration
+    let Pio {
+        mut common, sm0, ..
+    } = Pio::new(p.PIO0, Irqs);
+
     // Pins declaration
     let mut _led = Output::new(p.PIN_25, Level::Low);
     let switch = Input::new(p.PIN_22, Pull::Up);
     let mut pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let mut pot1 = Channel::new_pin(p.PIN_27, Pull::None);
+    let encoder = init_encoder(&mut common, sm0, p.PIN_2, p.PIN_3);
 
     spawner.spawn(display_manager_task(display).unwrap());
     spawner.spawn(deck_switch_task(switch).unwrap());
+    spawner.spawn(encoder_task(encoder).unwrap());
 
     // Inizialize EMA filter and other variables for ADC
     let init_pot0 = read_adc_averaged(&mut adc, &mut pot0).await;
