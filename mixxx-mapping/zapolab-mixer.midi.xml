@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<MixxxControllerPreset mixxxVersion="2.5.0" schemaVersion="1">
+  <info>
+    <name>zapolab mixer</name>
+    <author>zapolab</author>
+    <description>Mapping for the zapolab RP2040 MIDI mixer: two volume faders, two play/pause buttons with LED feedback, a load button per deck and a library scroll encoder. Everything sits on MIDI channel 1.</description>
+    <wiki>https://github.com/zapolab/midi-mixer</wiki>
+  </info>
+  <!-- id must match the USB MIDI product string on firmware advertises -->
+  <controller id="zapolab mixer">
+    <controls>
+      <!-- Potentiometers: CC 0x00-0x0F -->
+      <control>
+        <group>[Channel1]</group>
+        <key>volume</key>
+        <description>Deck 1 volume fader</description>
+        <status>0xB0</status>
+        <midino>0x00</midino>
+        <options>
+          <normal/>
+        </options>
+      </control>
+      <control>
+        <group>[Channel2]</group>
+        <key>volume</key>
+        <description>Deck 2 volume fader</description>
+        <status>0xB0</status>
+        <midino>0x01</midino>
+        <options>
+          <normal/>
+        </options>
+      </control>
+      <!--
+        Encoders: CC 0x10-0x1F.
+        Firmware sends 0x41 UP and 0x3F DOWN
+      -->
+      <control>
+        <group>[Library]</group>
+        <key>MoveVertical</key>
+        <description>Scroll through the library</description>
+        <status>0xB0</status>
+        <midino>0x10</midino>
+        <options>
+          <selectknob/>
+        </options>
+      </control>
+      <!-- Buttons: Note On 0x00-0x1F -->
+      <control>
+        <group>[Channel1]</group>
+        <key>play</key>
+        <description>Deck 1 play/pause</description>
+        <status>0x90</status>
+        <midino>0x00</midino>
+        <options>
+          <normal/>
+        </options>
+      </control>
+      <control>
+        <group>[Channel2]</group>
+        <key>play</key>
+        <description>Deck 2 play/pause</description>
+        <status>0x90</status>
+        <midino>0x01</midino>
+        <options>
+          <normal/>
+        </options>
+      </control>
+      <!-- Load: the firmware decides to send 0x02 or 0x03 based on deck switch value. -->
+      <control>
+        <group>[Channel1]</group>
+        <key>LoadSelectedTrack</key>
+        <description>Load selected track into deck 1</description>
+        <status>0x90</status>
+        <midino>0x02</midino>
+        <options>
+          <normal/>
+        </options>
+      </control>
+      <control>
+        <group>[Channel2]</group>
+        <key>LoadSelectedTrack</key>
+        <description>Load selected track into deck 2</description>
+        <status>0x90</status>
+        <midino>0x03</midino>
+        <options>
+          <normal/>
+        </options>
+      </control>
+    </controls>
+    <outputs>
+      <!-- LED feedback: Note On 0x20-0x2F. -->
+      <output>
+        <group>[Channel1]</group>
+        <key>play_indicator</key>
+        <description>Deck 1 play LED</description>
+        <status>0x90</status>
+        <midino>0x20</midino>
+        <on>0x7F</on>
+        <off>0x00</off>
+        <minimum>0.5</minimum>
+        <maximum>1.0</maximum>
+      </output>
+      <output>
+        <group>[Channel2]</group>
+        <key>play_indicator</key>
+        <description>Deck 2 play LED</description>
+        <status>0x90</status>
+        <midino>0x21</midino>
+        <on>0x7F</on>
+        <off>0x00</off>
+        <minimum>0.5</minimum>
+        <maximum>1.0</maximum>
+      </output>
+      <!-- LED feedback: Blink every 500ms while playing-->
+      <output>
+        <group>[App]</group>
+        <key>indicator_500ms</key>
+        <description>500ms LED blinking while playing</description>
+        <status>0x90</status>
+        <midino>0x2F</midino>
+        <on>0x7F</on>
+        <off>0x00</off>
+        <minimum>0.5</minimum>
+        <maximum>1.0</maximum>
+      </output>
+    </outputs>
+  </controller>
+</MixxxControllerPreset>
