@@ -354,6 +354,8 @@ async fn main(spawner: Spawner) {
     // Pins declaration
     let mut _led = Output::new(p.PIN_25, Level::Low);
     let switch = Input::new(p.PIN_22, Pull::Up);
+    let play0 = Input::new(p.PIN_14, Pull::Up);
+    let play1 = Input::new(p.PIN_15, Pull::Up);
     let mut pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let mut pot1 = Channel::new_pin(p.PIN_27, Pull::None);
     let encoder = init_encoder(&mut common, sm0, p.PIN_2, p.PIN_3);
@@ -361,6 +363,8 @@ async fn main(spawner: Spawner) {
     spawner.spawn(display_manager_task(display).unwrap());
     spawner.spawn(deck_switch_task(switch).unwrap());
     spawner.spawn(encoder_task(encoder).unwrap());
+    spawner.spawn(play_button_task(play0, 0).unwrap());
+    spawner.spawn(play_button_task(play1, 1).unwrap());
 
     // Inizialize EMA filter and other variables for ADC
     let init_pot0 = read_adc_averaged(&mut adc, &mut pot0).await;
