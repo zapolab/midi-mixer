@@ -3,7 +3,7 @@
 
 use core::{
     fmt::Write,
-    sync::atomic::{AtomicU8, Ordering},
+    sync::atomic::{AtomicBool, AtomicU8, Ordering},
 };
 use defmt::{info, warn};
 use embassy_executor::Spawner;
@@ -54,6 +54,7 @@ enum DisplayCmd {
     DrawPot(PotReadings),
     DrawSelectedDeck(u8),
     DrawCount(u8),
+    DrawPlayState(bool, usize),
 }
 
 // Encoder lines are sampled every ~5 µs
@@ -71,6 +72,7 @@ static DISPLAY_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, Displ
     embassy_sync::channel::Channel::new();
 
 static SELECTED_DECK: AtomicU8 = AtomicU8::new(0);
+static PLAY_STATE: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
 
 bind_interrupts!(
     struct Irqs {
@@ -302,6 +304,33 @@ async fn encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
         if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawCount(data)) {
             warn!("Channel full!");
         }
+    }
+}
+
+/// Async task handling play/pause button press
+// One instance per deck, so the pool must hold both.
+#[embassy_executor::task(pool_size = 2)]
+async fn play_button_task(mut button: Input<'static>, channel: usize) {
+    // Actual logic will only send MIDI Note On/Off signal
+
+    // Send update to channel
+    let play_state = PLAY_STATE[channel].load(Ordering::Relaxed);
+    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(play_state, channel)) {
+        warn!("Channel full!");
+    }
+
+    loop {
+        button.wait_for_low().await;
+        PLAY_STATE[channel].store(
+            !PLAY_STATE[channel].load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+
+        let play_state = PLAY_STATE[channel].load(Ordering::Relaxed);
+        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(play_state, channel)) {
+            warn!("Channel full!");
+        }
+        button.wait_for_high().await;
     }
 }
 
