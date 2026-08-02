@@ -1,0 +1,22 @@
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.ref }}-${{ github.workflow }}
+
+jobs:
+  check-xmllint:
+    name: Validate XML files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the repository
+        uses: actions/checkout@v6.0.2
+      - name: Install xmllint
+        run: sudo apt-get update && sudo apt-get install --yes libxml2-utils
+      - name: Validate Mixxx mappings against the RELAX NG schema
+        run: xmllint --noout --relaxng mixxx-mapping/mixxx-mapping.rng mixxx-mapping/*.midi.xml
+
+name: check-xmllint.yaml
+
+"on":
+  pull_request:
+    branches:
+      - main
