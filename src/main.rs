@@ -370,6 +370,10 @@ async fn play_button_task(mut button: Input<'static>, channel: usize) {
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
+
+    // Boot sentinel
+    let mut status_led = Output::new(p.PIN_25, Level::High);
+
     let mut adc = Adc::new(p.ADC, Irqs, AdcConfig::default());
     let i2c = I2c::new_async(p.I2C0, p.PIN_17, p.PIN_16, Irqs, I2cConfig::default());
 
@@ -387,7 +391,6 @@ async fn main(spawner: Spawner) {
     } = Pio::new(p.PIO0, Irqs);
 
     // Pins declaration
-    let mut _led = Output::new(p.PIN_25, Level::Low);
     let switch = Input::new(p.PIN_22, Pull::Up);
     let play0 = Input::new(p.PIN_14, Pull::Up);
     let play1 = Input::new(p.PIN_15, Pull::Up);
@@ -409,6 +412,9 @@ async fn main(spawner: Spawner) {
     let alpha: f32 = 0.5; // 0.0 = very slow, 1.0 = no filter
     let mut last_pot0: u16 = 0;
     let mut last_pot1: u16 = 0;
+
+    // Boot done
+    status_led.set_low();
 
     loop {
         // Async averaged adc read
