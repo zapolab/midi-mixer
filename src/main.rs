@@ -3,7 +3,7 @@
 
 use core::{
     fmt::Write,
-    sync::atomic::{AtomicU8, Ordering},
+    sync::atomic::{AtomicBool, AtomicU8, Ordering},
 };
 use defmt::{info, warn};
 use embassy_executor::Spawner;
@@ -21,7 +21,7 @@ use embassy_rp::{
     },
     pio_programs::clock_divider::calculate_pio_clock_divider,
 };
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
 use embassy_time::{Duration, Timer};
 use embedded_graphics::{
     mono_font::{MonoTextStyleBuilder, ascii::FONT_6X10},
@@ -30,6 +30,7 @@ use embedded_graphics::{
     primitives::Rectangle,
     text::{Baseline, Text},
 };
+use futures::future::select;
 use gpio::{Level, Output};
 use heapless::String;
 use ssd1306::{
@@ -54,6 +55,7 @@ enum DisplayCmd {
     DrawPot(PotReadings),
     DrawSelectedDeck(u8),
     DrawCount(u8),
+    DrawPlayState(bool, usize),
 }
 
 // Encoder lines are sampled every ~5 µs
@@ -66,11 +68,13 @@ const QUADRATURE_TABLE: [i8; 16] = [
     1, 0, 0, -1, //
     0, -1, 1, 0, //
 ];
+const BLINK_PERIOD: Duration = Duration::from_millis(500);
 
 static DISPLAY_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, DisplayCmd, 8> =
     embassy_sync::channel::Channel::new();
-
 static SELECTED_DECK: AtomicU8 = AtomicU8::new(0);
+static PLAY_STATE: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
+static CHANGE_LED: [Signal<ThreadModeRawMutex, ()>; 2] = [Signal::new(), Signal::new()];
 
 bind_interrupts!(
     struct Irqs {
@@ -176,7 +180,7 @@ async fn display_manager_task(
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
-                write!(buf, "{} %", data.percentage_pot0).unwrap();
+                write!(buf, "{}%", data.percentage_pot0).unwrap();
                 Text::with_baseline(buf.as_str(), Point::new(32, 0), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
@@ -193,7 +197,7 @@ async fn display_manager_task(
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
-                write!(buf, "{} %", data.percentage_pot1).unwrap();
+                write!(buf, "{}%", data.percentage_pot1).unwrap();
                 Text::with_baseline(buf.as_str(), Point::new(32, 10), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
@@ -239,6 +243,39 @@ async fn display_manager_task(
                 Text::with_baseline(buf.as_str(), Point::new(12, 20), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
+            }
+            DisplayCmd::DrawPlayState(state, channel) => {
+                display
+                    .fill_solid(
+                        &Rectangle::new(
+                            if channel == 0 {
+                                Point::new(0, 30)
+                            } else {
+                                Point::new(36, 30)
+                            },
+                            Size::new(30, 10),
+                        ),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
+
+                // 8-char buffer
+                let mut buf: String<8> = String::new();
+
+                write!(buf, "{}", state).unwrap();
+
+                Text::with_baseline(
+                    buf.as_str(),
+                    if channel == 0 {
+                        Point::new(0, 30)
+                    } else {
+                        Point::new(36, 30)
+                    },
+                    text_style,
+                    Baseline::Top,
+                )
+                .draw(&mut display)
+                .unwrap();
             }
         }
         display.flush().unwrap();
@@ -305,9 +342,59 @@ async fn encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
     }
 }
 
+/// Async task handling play/pause button press
+// One instance per deck, so the pool must hold both.
+#[embassy_executor::task(pool_size = 2)]
+async fn play_button_task(mut button: Input<'static>, channel: usize) {
+    // Actual logic will only send MIDI Note On/Off signal
+
+    // Send update to channel
+    let play_state = PLAY_STATE[channel].load(Ordering::Relaxed);
+    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(play_state, channel)) {
+        warn!("Channel full!");
+    }
+
+    loop {
+        button.wait_for_low().await;
+        PLAY_STATE[channel].store(
+            !PLAY_STATE[channel].load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+
+        let play_state = PLAY_STATE[channel].load(Ordering::Relaxed);
+        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(play_state, channel)) {
+            warn!("Channel full!");
+        }
+
+        // This will be done by MIDI reader
+        CHANGE_LED[channel].signal(());
+
+        button.wait_for_high().await;
+    }
+}
+
+/// Async task handling play/pause led state
+// One instance per deck, so the pool must hold both.
+#[embassy_executor::task(pool_size = 2)]
+async fn play_led_task(mut led: Output<'static>, channel: usize) {
+    loop {
+        if PLAY_STATE[channel].load(Ordering::Relaxed) {
+            led.set_high();
+            CHANGE_LED[channel].wait().await;
+        } else {
+            led.toggle();
+            select(CHANGE_LED[channel].wait(), Timer::after(BLINK_PERIOD)).await;
+        }
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
+
+    // Boot sentinel
+    let mut status_led = Output::new(p.PIN_25, Level::High);
+
     let mut adc = Adc::new(p.ADC, Irqs, AdcConfig::default());
     let i2c = I2c::new_async(p.I2C0, p.PIN_17, p.PIN_16, Irqs, I2cConfig::default());
 
@@ -316,6 +403,8 @@ async fn main(spawner: Spawner) {
     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
     display.init().unwrap();
+    display.clear(BinaryColor::Off).unwrap();
+    display.flush().unwrap();
 
     // Pio declaration
     let Pio {
@@ -323,8 +412,11 @@ async fn main(spawner: Spawner) {
     } = Pio::new(p.PIO0, Irqs);
 
     // Pins declaration
-    let mut _led = Output::new(p.PIN_25, Level::Low);
     let switch = Input::new(p.PIN_22, Pull::Up);
+    let play0 = Input::new(p.PIN_14, Pull::Up);
+    let play1 = Input::new(p.PIN_15, Pull::Up);
+    let led_play0 = Output::new(p.PIN_13, Level::Low);
+    let led_play1 = Output::new(p.PIN_12, Level::Low);
     let mut pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let mut pot1 = Channel::new_pin(p.PIN_27, Pull::None);
     let encoder = init_encoder(&mut common, sm0, p.PIN_2, p.PIN_3);
@@ -332,6 +424,10 @@ async fn main(spawner: Spawner) {
     spawner.spawn(display_manager_task(display).unwrap());
     spawner.spawn(deck_switch_task(switch).unwrap());
     spawner.spawn(encoder_task(encoder).unwrap());
+    spawner.spawn(play_button_task(play0, 0).unwrap());
+    spawner.spawn(play_button_task(play1, 1).unwrap());
+    spawner.spawn(play_led_task(led_play0, 0).unwrap());
+    spawner.spawn(play_led_task(led_play1, 1).unwrap());
 
     // Inizialize EMA filter and other variables for ADC
     let init_pot0 = read_adc_averaged(&mut adc, &mut pot0).await;
@@ -341,6 +437,9 @@ async fn main(spawner: Spawner) {
     let alpha: f32 = 0.5; // 0.0 = very slow, 1.0 = no filter
     let mut last_pot0: u16 = 0;
     let mut last_pot1: u16 = 0;
+
+    // Boot done
+    status_led.set_low();
 
     loop {
         // Async averaged adc read
