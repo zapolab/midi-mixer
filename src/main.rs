@@ -242,6 +242,39 @@ async fn display_manager_task(
                     .draw(&mut display)
                     .unwrap();
             }
+            DisplayCmd::DrawPlayState(state, channel) => {
+                display
+                    .fill_solid(
+                        &Rectangle::new(
+                            if channel == 0 {
+                                Point::new(0, 30)
+                            } else {
+                                Point::new(36, 30)
+                            },
+                            Size::new(30, 10),
+                        ),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
+
+                // 8-char buffer
+                let mut buf: String<8> = String::new();
+
+                write!(buf, "{}", state).unwrap();
+
+                Text::with_baseline(
+                    buf.as_str(),
+                    if channel == 0 {
+                        Point::new(0, 30)
+                    } else {
+                        Point::new(36, 30)
+                    },
+                    text_style,
+                    Baseline::Top,
+                )
+                .draw(&mut display)
+                .unwrap();
+            }
         }
         display.flush().unwrap();
     }
