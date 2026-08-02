@@ -178,7 +178,7 @@ async fn display_manager_task(
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
-                write!(buf, "{} %", data.percentage_pot0).unwrap();
+                write!(buf, "{}%", data.percentage_pot0).unwrap();
                 Text::with_baseline(buf.as_str(), Point::new(32, 0), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
@@ -195,7 +195,7 @@ async fn display_manager_task(
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
-                write!(buf, "{} %", data.percentage_pot1).unwrap();
+                write!(buf, "{}%", data.percentage_pot1).unwrap();
                 Text::with_baseline(buf.as_str(), Point::new(32, 10), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
@@ -378,6 +378,8 @@ async fn main(spawner: Spawner) {
     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
     display.init().unwrap();
+    display.clear(BinaryColor::Off).unwrap();
+    display.flush().unwrap();
 
     // Pio declaration
     let Pio {
