@@ -54,7 +54,7 @@ struct PotReadings {
 enum DisplayCmd {
     DrawPot(PotReadings),
     DrawSelectedDeck(u8),
-    DrawCount(u8),
+    DrawDirection(u8),
     DrawPlayState(bool, usize),
 }
 
@@ -223,7 +223,7 @@ async fn display_manager_task(
                     .draw(&mut display)
                     .unwrap();
             }
-            DisplayCmd::DrawCount(data) => {
+            DisplayCmd::DrawDirection(data) => {
                 display
                     .fill_solid(
                         &Rectangle::new(Point::new(12, 20), Size::new(24, 10)),
@@ -335,7 +335,7 @@ async fn load_encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
         let data = if quarter > 0 { 1 } else { 0 };
         quarter = 0;
 
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawCount(data)) {
+        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawDirection(data)) {
             warn!("Channel full!");
         }
     }
@@ -416,17 +416,17 @@ async fn main(spawner: Spawner) {
     let play_button1 = Input::new(p.PIN_15, Pull::Up);
     let play_led0 = Output::new(p.PIN_13, Level::Low);
     let play_led1 = Output::new(p.PIN_12, Level::Low);
+    let load_encoder = init_encoder(&mut common, sm0, p.PIN_2, p.PIN_3);
     let mut volume_pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let mut volume_pot1 = Channel::new_pin(p.PIN_27, Pull::None);
-    let load_encoder = init_encoder(&mut common, sm0, p.PIN_2, p.PIN_3);
 
     spawner.spawn(display_manager_task(display).unwrap());
     spawner.spawn(deck_switch_task(deck_switch).unwrap());
-    spawner.spawn(load_encoder_task(load_encoder).unwrap());
     spawner.spawn(play_button_task(play_button0, 0).unwrap());
     spawner.spawn(play_button_task(play_button1, 1).unwrap());
     spawner.spawn(play_led_task(play_led0, 0).unwrap());
     spawner.spawn(play_led_task(play_led1, 1).unwrap());
+    spawner.spawn(load_encoder_task(load_encoder).unwrap());
 
     // Inizialize EMA filter and other variables for ADC
     let init_pot0 = read_adc_averaged(&mut adc, &mut volume_pot0).await;
