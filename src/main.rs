@@ -16,6 +16,7 @@ use embassy_rp::{
     pio::{InterruptHandler as PioInterruptHandler, Pio},
     usb::{Driver, InterruptHandler as USBInterruptHandler},
 };
+use embassy_time::{Duration, Timer};
 use embassy_usb::{Builder, Config as USBConfig, class::midi::MidiClass};
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use ssd1306::{
@@ -29,7 +30,7 @@ use crate::{
         deck::deck_switch_task,
         load::{init_encoder, load_button_task, load_encoder_task},
         play::{play_button_task, play_led_task},
-        volume,
+        volume::{init_adc, volume_pot_task},
     },
     display::display_manager_task,
     midi::{midi_rx_task, midi_tx_task, usb_task},
@@ -51,7 +52,7 @@ async fn main(spawner: Spawner) {
     // Boot sentinel
     let mut status_led = Output::new(p.PIN_25, Level::High);
 
-    let adc = Adc::new(p.ADC, Irqs, AdcConfig::default());
+    let adc = init_adc(Adc::new(p.ADC, Irqs, AdcConfig::default()));
     let i2c = I2c::new_async(p.I2C0, p.PIN_17, p.PIN_16, Irqs, I2cConfig::default());
 
     // Display initialization
@@ -118,9 +119,17 @@ async fn main(spawner: Spawner) {
     spawner.spawn(play_led_task(play_led1, 1).unwrap());
     spawner.spawn(load_encoder_task(load_encoder).unwrap());
     spawner.spawn(load_button_task(load_button).unwrap());
+    spawner.spawn(volume_pot_task(adc, volume_pot0, 0).unwrap());
+    spawner.spawn(volume_pot_task(adc, volume_pot1, 1).unwrap());
 
     // Boot done
     status_led.set_low();
 
-    volume::run(adc, volume_pot0, volume_pot1).await
+    // Heartbeat
+    loop {
+        Timer::after(Duration::from_secs(4)).await;
+        status_led.set_high();
+        Timer::after(Duration::from_millis(150)).await;
+        status_led.set_low();
+    }
 }

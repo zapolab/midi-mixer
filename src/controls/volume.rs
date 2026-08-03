@@ -1,18 +1,29 @@
-//! Volume potentiometers: ADC sampling and filtering
-//!
-//! Unlike the other controls this is not spawned as a task — `main` owns the
-//! ADC and awaits [`run`] as its final act.
+//! Potentiometers: ADC sampling and filtering
 
 use embassy_rp::adc::{Adc, Async, Channel};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Timer};
+use static_cell::StaticCell;
 
 use crate::{
     display::{DisplayCmd, PotReadings, send_display},
     midi::{MidiMsg, send_midi},
 };
 
+// 0.0 = very slow, 1.0 = no filter
+const ALPHA: f32 = 0.5;
+
+pub(crate) type SharedAdc = Mutex<ThreadModeRawMutex, Adc<'static, Async>>;
+static ADC: StaticCell<SharedAdc> = StaticCell::new();
+
+/// Give the ADC
+pub(crate) fn init_adc(adc: Adc<'static, Async>) -> &'static SharedAdc {
+    ADC.init(Mutex::new(adc))
+}
+
 /// Read 16 values and return the average
-async fn read_adc_averaged(adc: &mut Adc<'_, Async>, ch: &mut Channel<'_>) -> u16 {
+async fn read_adc_averaged(adc: &SharedAdc, ch: &mut Channel<'_>) -> u16 {
+    let mut adc = adc.lock().await;
     let mut sum: u32 = 0;
     for _ in 0..16 {
         let val = adc.read(ch).await.unwrap();
@@ -32,68 +43,50 @@ fn filtered_to_midi_range(raw: u16) -> u8 {
     ((raw as u32 * 127) / 4095).min(127) as u8
 }
 
-/// Drives the potentiometer sampling loop (50 ms period).
-pub(crate) async fn run(
-    mut adc: Adc<'static, Async>,
-    mut volume_pot0: Channel<'static>,
-    mut volume_pot1: Channel<'static>,
-) -> ! {
+/// Async task reading one potentiometer
+// One instance per pot, so the pool must hold them all.
+#[embassy_executor::task(pool_size = 2)]
+pub(crate) async fn volume_pot_task(
+    adc: &'static SharedAdc,
+    mut pot: Channel<'static>,
+    channel: usize,
+) {
     // Inizialize EMA filter and other variables for ADC
-    let init_pot0 = read_adc_averaged(&mut adc, &mut volume_pot0).await;
-    let init_pot1 = read_adc_averaged(&mut adc, &mut volume_pot1).await;
-    let mut ema_pot0: f32 = init_pot0 as f32;
-    let mut ema_pot1: f32 = init_pot1 as f32;
-    let alpha: f32 = 0.5; // 0.0 = very slow, 1.0 = no filter
-    let mut last_pot0: u16 = 0;
-    let mut last_pot1: u16 = 0;
-    let mut last_midi_pot0: u8 = 0xFF;
-    let mut last_midi_pot1: u8 = 0xFF;
+    let mut ema: f32 = read_adc_averaged(adc, &mut pot).await as f32;
+    let mut last_raw: u16 = 0;
+    let mut last_midi: u8 = 0xFF;
 
     loop {
         // Async averaged adc read
-        let raw_pot0 = read_adc_averaged(&mut adc, &mut volume_pot0).await;
-        let raw_pot1 = read_adc_averaged(&mut adc, &mut volume_pot1).await;
+        let raw = read_adc_averaged(adc, &mut pot).await;
 
         // Send only new values
-        if last_pot0 != raw_pot0 || last_pot1 != raw_pot1 {
-            last_pot0 = raw_pot0;
-            last_pot1 = raw_pot1;
+        if last_raw != raw {
+            last_raw = raw;
 
             // EMA filter: y[n] = α·x[n] + (1−α)·y[n−1]
-            ema_pot0 = alpha * raw_pot0 as f32 + (1.0 - alpha) * ema_pot0;
-            ema_pot1 = alpha * raw_pot1 as f32 + (1.0 - alpha) * ema_pot1;
+            ema = ALPHA * raw as f32 + (1.0 - ALPHA) * ema;
 
-            let filtered_pot0 = ema_pot0 as u16;
-            let filtered_pot1 = ema_pot1 as u16;
+            let filtered = ema as u16;
             // TODO: hardware low pass filter. For now there is a little bit of noise and filtered value reach only 4094
 
             let data = PotReadings {
-                filtered_pot0,
-                filtered_pot1,
-                percentage_pot0: filtered_to_percent(filtered_pot0),
-                percentage_pot1: filtered_to_percent(filtered_pot1),
-                midi_range_pot0: filtered_to_midi_range(filtered_pot0),
-                midi_range_pot1: filtered_to_midi_range(filtered_pot1),
+                filtered,
+                percentage: filtered_to_percent(filtered),
+                midi_range: filtered_to_midi_range(filtered),
             };
 
             // Emit a CC only when the 7-bit value actually moves.
-            if data.midi_range_pot0 != last_midi_pot0 {
-                last_midi_pot0 = data.midi_range_pot0;
+            if data.midi_range != last_midi {
+                last_midi = data.midi_range;
                 send_midi(MidiMsg::ControlChange {
-                    cc: 0x00,
-                    value: data.midi_range_pot0,
-                });
-            }
-            if data.midi_range_pot1 != last_midi_pot1 {
-                last_midi_pot1 = data.midi_range_pot1;
-                send_midi(MidiMsg::ControlChange {
-                    cc: 0x01,
-                    value: data.midi_range_pot1,
+                    cc: if channel == 0 { 0x00 } else { 0x01 },
+                    value: data.midi_range,
                 });
             }
 
             // Send latest data to channel
-            send_display(DisplayCmd::DrawPot(data));
+            send_display(DisplayCmd::DrawPot(data, channel));
         }
 
         Timer::after(Duration::from_millis(50)).await;

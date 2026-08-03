@@ -29,17 +29,14 @@ pub(crate) type Display = Ssd1306<
 /// Struct for potentiometer read values
 #[derive(Clone, Copy)] // needed for not losing ownership when sending into channel
 pub(crate) struct PotReadings {
-    pub(crate) filtered_pot0: u16,
-    pub(crate) filtered_pot1: u16,
-    pub(crate) percentage_pot0: u8,
-    pub(crate) percentage_pot1: u8,
-    pub(crate) midi_range_pot0: u8,
-    pub(crate) midi_range_pot1: u8,
+    pub(crate) filtered: u16,
+    pub(crate) percentage: u8,
+    pub(crate) midi_range: u8,
 }
 
 /// Struct for potentiometer read values
 pub(crate) enum DisplayCmd {
-    DrawPot(PotReadings),
+    DrawPot(PotReadings, usize),
     DrawSelectedDeck(u8),
     DrawDirection(u8),
     DrawPlayState(bool, usize),
@@ -68,10 +65,12 @@ pub(crate) async fn display_manager_task(mut display: Display) {
     loop {
         let cmd = DISPLAY_CHANNEL.receive().await;
         match cmd {
-            DisplayCmd::DrawPot(data) => {
+            DisplayCmd::DrawPot(data, channel) => {
+                let y = if channel == 0 { 0 } else { 10 };
+
                 display
                     .fill_solid(
-                        &Rectangle::new(Point::new(0, 0), Size::new(128, 20)),
+                        &Rectangle::new(Point::new(0, y), Size::new(128, 10)),
                         BinaryColor::Off,
                     )
                     .unwrap();
@@ -79,36 +78,18 @@ pub(crate) async fn display_manager_task(mut display: Display) {
                 // 8-char buffer
                 let mut buf: String<8> = String::new();
 
-                // Write pot0
-                write!(buf, "{}", data.filtered_pot0).unwrap();
-                Text::with_baseline(buf.as_str(), Point::new(0, 0), text_style, Baseline::Top)
+                write!(buf, "{}", data.filtered).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(0, y), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
-                write!(buf, "{}%", data.percentage_pot0).unwrap();
-                Text::with_baseline(buf.as_str(), Point::new(32, 0), text_style, Baseline::Top)
+                write!(buf, "{}%", data.percentage).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(32, y), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
                 buf.clear();
-                write!(buf, "{} MIDI", data.midi_range_pot0).unwrap();
-                Text::with_baseline(buf.as_str(), Point::new(64, 0), text_style, Baseline::Top)
-                    .draw(&mut display)
-                    .unwrap();
-
-                // Write pot1
-                buf.clear();
-                write!(buf, "{}", data.filtered_pot1).unwrap();
-                Text::with_baseline(buf.as_str(), Point::new(0, 10), text_style, Baseline::Top)
-                    .draw(&mut display)
-                    .unwrap();
-                buf.clear();
-                write!(buf, "{}%", data.percentage_pot1).unwrap();
-                Text::with_baseline(buf.as_str(), Point::new(32, 10), text_style, Baseline::Top)
-                    .draw(&mut display)
-                    .unwrap();
-                buf.clear();
-                write!(buf, "{} MIDI", data.midi_range_pot1).unwrap();
-                Text::with_baseline(buf.as_str(), Point::new(64, 10), text_style, Baseline::Top)
+                write!(buf, "{} MIDI", data.midi_range).unwrap();
+                Text::with_baseline(buf.as_str(), Point::new(64, y), text_style, Baseline::Top)
                     .draw(&mut display)
                     .unwrap();
             }
