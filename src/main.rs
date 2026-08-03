@@ -56,6 +56,7 @@ enum DisplayCmd {
     DrawSelectedDeck(u8),
     DrawDirection(u8),
     DrawPlayState(bool, usize),
+    DrawLoad(u8),
 }
 
 // Encoder lines are sampled every ~5 µs
@@ -341,6 +342,31 @@ async fn load_encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
     }
 }
 
+/// Async task reading load button press
+#[embassy_executor::task]
+async fn load_button_task(mut button: Input<'static>) {
+    // Actual logic will send MIDI Note On/Off signal
+
+    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(0)) {
+        warn!("Channel full!");
+    }
+
+    loop {
+        button.wait_for_low().await;
+        // Send MIDI
+
+        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(1)) {
+            warn!("Channel full!");
+        }
+
+        button.wait_for_high().await;
+
+        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(0)) {
+            warn!("Channel full!");
+        }
+    }
+}
+
 /// Async task handling play/pause button press
 // One instance per deck, so the pool must hold both.
 #[embassy_executor::task(pool_size = 2)]
@@ -417,6 +443,7 @@ async fn main(spawner: Spawner) {
     let play_led0 = Output::new(p.PIN_13, Level::Low);
     let play_led1 = Output::new(p.PIN_12, Level::Low);
     let load_encoder = init_encoder(&mut common, sm0, p.PIN_2, p.PIN_3);
+    let load_button = Input::new(p.PIN_21, Pull::Up);
     let mut volume_pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let mut volume_pot1 = Channel::new_pin(p.PIN_27, Pull::None);
 
@@ -427,6 +454,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(play_led_task(play_led0, 0).unwrap());
     spawner.spawn(play_led_task(play_led1, 1).unwrap());
     spawner.spawn(load_encoder_task(load_encoder).unwrap());
+    spawner.spawn(load_button_task(load_button).unwrap());
 
     // Inizialize EMA filter and other variables for ADC
     let init_pot0 = read_adc_averaged(&mut adc, &mut volume_pot0).await;
