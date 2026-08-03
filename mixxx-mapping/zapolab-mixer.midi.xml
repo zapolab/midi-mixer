@@ -8,7 +8,7 @@
     <wiki>https://github.com/zapolab/midi-mixer</wiki>
   </info>
   <!-- id must match the USB MIDI product string on firmware advertises -->
-  <controller id="zapolab mixer">
+  <controller id="RP2040 Mixer">
     <controls>
       <!-- Potentiometers: CC 0x00-0x0F -->
       <control>
