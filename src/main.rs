@@ -13,16 +13,21 @@ use embassy_rp::{
     bind_interrupts,
     gpio::{self, Input, Pull},
     i2c::{Async, Config as I2cConfig, I2c, InterruptHandler as I2cInterruptHandler},
-    peripherals::{I2C0, PIO0},
+    peripherals::{I2C0, PIO0, USB},
     pio::{
         Common, Config as PioConfig, Direction as PioDirection, FifoJoin,
         InterruptHandler as PioInterruptHandler, Pio, PioPin, ShiftDirection, StateMachine,
         program,
     },
     pio_programs::clock_divider::calculate_pio_clock_divider,
+    usb::{Driver, InterruptHandler as USBInterruptHandler},
 };
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
 use embassy_time::{Duration, Timer};
+use embassy_usb::{
+    Builder, Config as USBConfig, UsbDevice,
+    class::midi::{MidiClass, Receiver, Sender},
+};
 use embedded_graphics::{
     mono_font::{MonoTextStyleBuilder, ascii::FONT_6X10},
     pixelcolor::BinaryColor,
@@ -30,13 +35,13 @@ use embedded_graphics::{
     primitives::Rectangle,
     text::{Baseline, Text},
 };
-use futures::future::select;
 use gpio::{Level, Output};
 use heapless::String;
 use ssd1306::{
     I2CDisplayInterface, Ssd1306, mode::BufferedGraphicsMode, prelude::*,
     rotation::DisplayRotation, size::DisplaySize128x64,
 };
+use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 /// Struct for potentiometer read values
@@ -59,6 +64,24 @@ enum DisplayCmd {
     DrawLoad(u8),
 }
 
+/// Outgoing MIDI events, as declared in `mixxx-mapping/zapolab-mixer.midi.xml`.
+#[derive(Clone, Copy)]
+enum MidiMsg {
+    ControlChange { cc: u8, value: u8 },
+    NoteOn { note: u8, velocity: u8 },
+    NoteOff { note: u8 },
+}
+
+impl MidiMsg {
+    fn to_usb_packet(self) -> [u8; 4] {
+        match self {
+            MidiMsg::ControlChange { cc, value } => [0x0B, 0xB0, cc, value],
+            MidiMsg::NoteOn { note, velocity } => [0x09, 0x90, note, velocity],
+            MidiMsg::NoteOff { note } => [0x08, 0x80, note, 0x00],
+        }
+    }
+}
+
 // Encoder lines are sampled every ~5 µs
 const ENCODER_PIO_CLOCK_HZ: u32 = 1_000_000;
 const QUARTER_STEPS_PER_DETENT: i8 = 2;
@@ -69,12 +92,15 @@ const QUADRATURE_TABLE: [i8; 16] = [
     1, 0, 0, -1, //
     0, -1, 1, 0, //
 ];
-const BLINK_PERIOD: Duration = Duration::from_millis(500);
 
+static MIDI_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, MidiMsg, 16> =
+    embassy_sync::channel::Channel::new();
 static DISPLAY_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, DisplayCmd, 8> =
     embassy_sync::channel::Channel::new();
 static SELECTED_DECK: AtomicU8 = AtomicU8::new(0);
 static PLAY_STATE: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
+// Mixxx's play_indicator LED
+static PLAY_INDICATOR: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
 static CHANGE_LED: [Signal<ThreadModeRawMutex, ()>; 2] = [Signal::new(), Signal::new()];
 
 bind_interrupts!(
@@ -82,8 +108,23 @@ bind_interrupts!(
         ADC_IRQ_FIFO => AdcInterruptHandler;
         I2C0_IRQ => I2cInterruptHandler<I2C0>;
         PIO0_IRQ_0 => PioInterruptHandler<PIO0>;
+        USBCTRL_IRQ => USBInterruptHandler<USB>;
     }
 );
+
+/// Push a MIDI message to TX task
+fn send_midi(msg: MidiMsg) {
+    if MIDI_CHANNEL.try_send(msg).is_err() {
+        warn!("MIDI channel full!");
+    }
+}
+
+/// Push a draw command to the display task
+fn send_display(cmd: DisplayCmd) {
+    if DISPLAY_CHANNEL.try_send(cmd).is_err() {
+        warn!("Display channel full!");
+    }
+}
 
 /// Starts the state machine for the encoder
 // Logic by AI
@@ -311,9 +352,7 @@ async fn deck_switch_task(mut switch: Input<'static>) {
 
     // Send update to channel
     let data = SELECTED_DECK.load(Ordering::Relaxed);
-    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawSelectedDeck(data)) {
-        warn!("Channel full!");
-    }
+    send_display(DisplayCmd::DrawSelectedDeck(data));
 
     loop {
         switch.wait_for_any_edge().await;
@@ -324,9 +363,7 @@ async fn deck_switch_task(mut switch: Input<'static>) {
         }
 
         let data = SELECTED_DECK.load(Ordering::Relaxed);
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawSelectedDeck(data)) {
-            warn!("Channel full!");
-        }
+        send_display(DisplayCmd::DrawSelectedDeck(data));
     }
 }
 
@@ -355,9 +392,13 @@ async fn load_encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
         let data = if quarter > 0 { 1 } else { 0 };
         quarter = 0;
 
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawDirection(data)) {
-            warn!("Channel full!");
-        }
+        // CC 0x10, 0x41 up, 0x3F down.
+        send_midi(MidiMsg::ControlChange {
+            cc: 0x10,
+            value: if data == 1 { 0x41 } else { 0x3F },
+        });
+
+        send_display(DisplayCmd::DrawDirection(data));
     }
 }
 
@@ -366,23 +407,23 @@ async fn load_encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
 async fn load_button_task(mut button: Input<'static>) {
     // Actual logic will send MIDI Note On/Off signal
 
-    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(0)) {
-        warn!("Channel full!");
-    }
+    send_display(DisplayCmd::DrawLoad(0));
 
     loop {
         button.wait_for_low().await;
-        // Send MIDI
+        // Note 0x02 or 0x03
+        let note = 0x02 + SELECTED_DECK.load(Ordering::Relaxed);
+        send_midi(MidiMsg::NoteOn {
+            note,
+            velocity: 0x7F,
+        });
 
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(1)) {
-            warn!("Channel full!");
-        }
+        send_display(DisplayCmd::DrawLoad(1));
 
         button.wait_for_high().await;
+        send_midi(MidiMsg::NoteOff { note });
 
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(0)) {
-            warn!("Channel full!");
-        }
+        send_display(DisplayCmd::DrawLoad(0));
     }
 }
 
@@ -390,30 +431,19 @@ async fn load_button_task(mut button: Input<'static>) {
 // One instance per deck, so the pool must hold both.
 #[embassy_executor::task(pool_size = 2)]
 async fn play_button_task(mut button: Input<'static>, channel: usize) {
-    // Actual logic will only send MIDI Note On/Off signal
-
-    // Send update to channel
-    let play_state = PLAY_STATE[channel].load(Ordering::Relaxed);
-    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(play_state, channel)) {
-        warn!("Channel full!");
-    }
+    send_display(DisplayCmd::DrawPlayState(false, channel));
 
     loop {
         button.wait_for_low().await;
-        PLAY_STATE[channel].store(
-            !PLAY_STATE[channel].load(Ordering::Relaxed),
-            Ordering::Relaxed,
-        );
-
-        let play_state = PLAY_STATE[channel].load(Ordering::Relaxed);
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(play_state, channel)) {
-            warn!("Channel full!");
-        }
-
-        // This will be done by MIDI reader
-        CHANGE_LED[channel].signal(());
+        send_midi(MidiMsg::NoteOn {
+            note: channel as u8,
+            velocity: 0x7F,
+        });
 
         button.wait_for_high().await;
+        send_midi(MidiMsg::NoteOff {
+            note: channel as u8,
+        });
     }
 }
 
@@ -422,12 +452,75 @@ async fn play_button_task(mut button: Input<'static>, channel: usize) {
 #[embassy_executor::task(pool_size = 2)]
 async fn play_led_task(mut led: Output<'static>, channel: usize) {
     loop {
-        if PLAY_STATE[channel].load(Ordering::Relaxed) {
-            led.set_high();
-            CHANGE_LED[channel].wait().await;
-        } else {
-            led.toggle();
-            select(CHANGE_LED[channel].wait(), Timer::after(BLINK_PERIOD)).await;
+        led.set_level(PLAY_INDICATOR[channel].load(Ordering::Relaxed).into());
+        CHANGE_LED[channel].wait().await;
+    }
+}
+
+/// Async task running USB device
+#[embassy_executor::task]
+async fn usb_task(mut usb: UsbDevice<'static, Driver<'static, USB>>) -> ! {
+    usb.run().await
+}
+
+/// Async task sending MIDI signals
+#[embassy_executor::task]
+async fn midi_tx_task(mut sender: Sender<'static, Driver<'static, USB>>) {
+    loop {
+        sender.wait_connection().await;
+        info!("MIDI TX connected.");
+
+        // Drop anything queued while the host was not listening.
+        while MIDI_CHANNEL.try_receive().is_ok() {}
+
+        loop {
+            let msg = MIDI_CHANNEL.receive().await;
+            if sender.write_packet(&msg.to_usb_packet()).await.is_err() {
+                warn!("MIDI TX disconnected.");
+                break;
+            }
+        }
+    }
+}
+
+/// Applies LED feedback coming from Mixxx on the USB OUT endpoint.
+#[embassy_executor::task]
+async fn midi_rx_task(mut receiver: Receiver<'static, Driver<'static, USB>>) {
+    let mut buf = [0u8; 64];
+    loop {
+        receiver.wait_connection().await;
+        info!("MIDI RX connected.");
+        loop {
+            let n = match receiver.read_packet(&mut buf).await {
+                Ok(n) => n,
+                Err(_) => {
+                    warn!("MIDI RX disconnected.");
+                    break;
+                }
+            };
+
+            // A transfer carries one or more 4-byte USB-MIDI event packets.
+            for packet in buf[..n].chunks_exact(4) {
+                let (status, note, velocity) = (packet[1], packet[2], packet[3]);
+
+                // Velocity 0 is Note Off.
+                let on = status & 0xF0 == 0x90 && velocity > 0;
+                match note {
+                    // play_indicator
+                    0x20 | 0x21 => {
+                        let deck = (note - 0x20) as usize;
+                        PLAY_INDICATOR[deck].store(on, Ordering::Relaxed);
+                        CHANGE_LED[deck].signal(());
+                    }
+                    // play
+                    0x22 | 0x23 => {
+                        let deck = (note - 0x22) as usize;
+                        PLAY_STATE[deck].store(on, Ordering::Relaxed);
+                        send_display(DisplayCmd::DrawPlayState(on, deck));
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 }
@@ -450,6 +543,34 @@ async fn main(spawner: Spawner) {
     display.clear(BinaryColor::Off).unwrap();
     display.flush().unwrap();
 
+    // USB configuration
+    let driver = Driver::new(p.USB, Irqs);
+    let mut config = USBConfig::new(0x1209, 0x0001); //pid.codes test PID
+    config.manufacturer = Some("Zapolab");
+    config.product = Some("RP2040 Mixer");
+    config.serial_number = Some("12345678");
+    config.max_power = 100;
+    config.max_packet_size_0 = 64;
+
+    // Descriptor buffers
+    static CONFIG_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
+    static BOS_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
+    static CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+
+    let mut builder = Builder::new(
+        driver,
+        config,
+        CONFIG_DESCRIPTOR.init([0; 256]),
+        BOS_DESCRIPTOR.init([0; 256]),
+        &mut [], // no msos descriptors
+        CONTROL_BUF.init([0; 64]),
+    );
+
+    // Create classes on the builder: 1 embedded IN jack, 1 embedded OUT jack.
+    let class = MidiClass::new(&mut builder, 1, 1, 64);
+    let (midi_sender, midi_receiver) = class.split();
+    let usb = builder.build();
+
     // Pio declaration
     let Pio {
         mut common, sm0, ..
@@ -466,6 +587,10 @@ async fn main(spawner: Spawner) {
     let mut volume_pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let mut volume_pot1 = Channel::new_pin(p.PIN_27, Pull::None);
 
+    // Task initialization
+    spawner.spawn(usb_task(usb).unwrap());
+    spawner.spawn(midi_tx_task(midi_sender).unwrap());
+    spawner.spawn(midi_rx_task(midi_receiver).unwrap());
     spawner.spawn(display_manager_task(display).unwrap());
     spawner.spawn(deck_switch_task(deck_switch).unwrap());
     spawner.spawn(play_button_task(play_button0, 0).unwrap());
@@ -483,6 +608,8 @@ async fn main(spawner: Spawner) {
     let alpha: f32 = 0.5; // 0.0 = very slow, 1.0 = no filter
     let mut last_pot0: u16 = 0;
     let mut last_pot1: u16 = 0;
+    let mut last_midi_pot0: u8 = 0xFF;
+    let mut last_midi_pot1: u8 = 0xFF;
 
     // Boot done
     status_led.set_low();
@@ -514,10 +641,24 @@ async fn main(spawner: Spawner) {
                 midi_range_pot1: filtered_to_midi_range(filtered_pot1),
             };
 
-            // Send latest data to channel
-            if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPot(data)) {
-                warn!("Channel full!");
+            // Emit a CC only when the 7-bit value actually moves.
+            if data.midi_range_pot0 != last_midi_pot0 {
+                last_midi_pot0 = data.midi_range_pot0;
+                send_midi(MidiMsg::ControlChange {
+                    cc: 0x00,
+                    value: data.midi_range_pot0,
+                });
             }
+            if data.midi_range_pot1 != last_midi_pot1 {
+                last_midi_pot1 = data.midi_range_pot1;
+                send_midi(MidiMsg::ControlChange {
+                    cc: 0x01,
+                    value: data.midi_range_pot1,
+                });
+            }
+
+            // Send latest data to channel
+            send_display(DisplayCmd::DrawPot(data));
         }
 
         Timer::after(Duration::from_millis(50)).await;

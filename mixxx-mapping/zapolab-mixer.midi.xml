@@ -8,7 +8,7 @@
     <wiki>https://github.com/zapolab/midi-mixer</wiki>
   </info>
   <!-- id must match the USB MIDI product string on firmware advertises -->
-  <controller id="zapolab mixer">
+  <controller id="RP2040 Mixer">
     <controls>
       <!-- Potentiometers: CC 0x00-0x0F -->
       <control>
@@ -112,13 +112,23 @@
         <minimum>0.5</minimum>
         <maximum>1.0</maximum>
       </output>
-      <!-- LED feedback: Blink every 500ms while playing-->
       <output>
-        <group>[App]</group>
-        <key>indicator_500ms</key>
-        <description>500ms LED blinking while playing</description>
+        <group>[Channel1]</group>
+        <key>play</key>
+        <description>Deck 1 play state</description>
         <status>0x90</status>
-        <midino>0x2F</midino>
+        <midino>0x22</midino>
+        <on>0x7F</on>
+        <off>0x00</off>
+        <minimum>0.5</minimum>
+        <maximum>1.0</maximum>
+      </output>
+      <output>
+        <group>[Channel2]</group>
+        <key>play</key>
+        <description>Deck 2 play state</description>
+        <status>0x90</status>
+        <midino>0x23</midino>
         <on>0x7F</on>
         <off>0x00</off>
         <minimum>0.5</minimum>
