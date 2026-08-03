@@ -92,7 +92,6 @@ const QUADRATURE_TABLE: [i8; 16] = [
     1, 0, 0, -1, //
     0, -1, 1, 0, //
 ];
-const BLINK_PERIOD: Duration = Duration::from_millis(500);
 
 static MIDI_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, MidiMsg, 16> =
     embassy_sync::channel::Channel::new();
@@ -100,6 +99,8 @@ static DISPLAY_CHANNEL: embassy_sync::channel::Channel<ThreadModeRawMutex, Displ
     embassy_sync::channel::Channel::new();
 static SELECTED_DECK: AtomicU8 = AtomicU8::new(0);
 static PLAY_STATE: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
+// Mixxx's play_indicator LED
+static PLAY_INDICATOR: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
 static CHANGE_LED: [Signal<ThreadModeRawMutex, ()>; 2] = [Signal::new(), Signal::new()];
 
 bind_interrupts!(
@@ -423,30 +424,21 @@ async fn load_button_task(mut button: Input<'static>) {
 // One instance per deck, so the pool must hold both.
 #[embassy_executor::task(pool_size = 2)]
 async fn play_button_task(mut button: Input<'static>, channel: usize) {
-    // Actual logic will only send MIDI Note On/Off signal
-
-    // Send update to channel
-    let play_state = PLAY_STATE[channel].load(Ordering::Relaxed);
-    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(play_state, channel)) {
+    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(false, channel)) {
         warn!("Channel full!");
     }
 
     loop {
         button.wait_for_low().await;
-        PLAY_STATE[channel].store(
-            !PLAY_STATE[channel].load(Ordering::Relaxed),
-            Ordering::Relaxed,
-        );
-
-        let play_state = PLAY_STATE[channel].load(Ordering::Relaxed);
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(play_state, channel)) {
-            warn!("Channel full!");
-        }
-
-        // This will be done by MIDI reader
-        CHANGE_LED[channel].signal(());
+        send_midi(MidiMsg::NoteOn {
+            note: channel as u8,
+            velocity: 0x7F,
+        });
 
         button.wait_for_high().await;
+        send_midi(MidiMsg::NoteOff {
+            note: channel as u8,
+        });
     }
 }
 
