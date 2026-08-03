@@ -13,16 +13,21 @@ use embassy_rp::{
     bind_interrupts,
     gpio::{self, Input, Pull},
     i2c::{Async, Config as I2cConfig, I2c, InterruptHandler as I2cInterruptHandler},
-    peripherals::{I2C0, PIO0},
+    peripherals::{I2C0, PIO0, USB},
     pio::{
         Common, Config as PioConfig, Direction as PioDirection, FifoJoin,
         InterruptHandler as PioInterruptHandler, Pio, PioPin, ShiftDirection, StateMachine,
         program,
     },
     pio_programs::clock_divider::calculate_pio_clock_divider,
+    usb::{Driver, InterruptHandler as USBInterruptHandler},
 };
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
 use embassy_time::{Duration, Timer};
+use embassy_usb::{
+    Builder, Config as USBConfig, UsbDevice,
+    class::midi::{MidiClass, Receiver, Sender},
+};
 use embedded_graphics::{
     mono_font::{MonoTextStyleBuilder, ascii::FONT_6X10},
     pixelcolor::BinaryColor,
@@ -30,13 +35,13 @@ use embedded_graphics::{
     primitives::Rectangle,
     text::{Baseline, Text},
 };
-use futures::future::select;
 use gpio::{Level, Output};
 use heapless::String;
 use ssd1306::{
     I2CDisplayInterface, Ssd1306, mode::BufferedGraphicsMode, prelude::*,
     rotation::DisplayRotation, size::DisplaySize128x64,
 };
+use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 /// Struct for potentiometer read values
@@ -82,6 +87,7 @@ bind_interrupts!(
         ADC_IRQ_FIFO => AdcInterruptHandler;
         I2C0_IRQ => I2cInterruptHandler<I2C0>;
         PIO0_IRQ_0 => PioInterruptHandler<PIO0>;
+        USBCTRL_IRQ => USBInterruptHandler<USB>;
     }
 );
 
@@ -449,6 +455,34 @@ async fn main(spawner: Spawner) {
     display.init().unwrap();
     display.clear(BinaryColor::Off).unwrap();
     display.flush().unwrap();
+
+    // USB configuration
+    let driver = Driver::new(p.USB, Irqs);
+    let mut config = USBConfig::new(0x1209, 0x0001); //pid.codes test PID
+    config.manufacturer = Some("Zapolab");
+    config.product = Some("RP2040 Mixer");
+    config.serial_number = Some("12345678");
+    config.max_power = 100;
+    config.max_packet_size_0 = 64;
+
+    // Descriptor buffers
+    static CONFIG_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
+    static BOS_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
+    static CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+
+    let mut builder = Builder::new(
+        driver,
+        config,
+        CONFIG_DESCRIPTOR.init([0; 256]),
+        BOS_DESCRIPTOR.init([0; 256]),
+        &mut [], // no msos descriptors
+        CONTROL_BUF.init([0; 64]),
+    );
+
+    // Create classes on the builder: 1 embedded IN jack, 1 embedded OUT jack.
+    let class = MidiClass::new(&mut builder, 1, 1, 64);
+    let (midi_sender, midi_receiver) = class.split();
+    let usb = builder.build();
 
     // Pio declaration
     let Pio {
