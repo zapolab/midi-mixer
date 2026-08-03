@@ -412,26 +412,26 @@ async fn main(spawner: Spawner) {
     } = Pio::new(p.PIO0, Irqs);
 
     // Pins declaration
-    let switch = Input::new(p.PIN_22, Pull::Up);
-    let play0 = Input::new(p.PIN_14, Pull::Up);
-    let play1 = Input::new(p.PIN_15, Pull::Up);
-    let led_play0 = Output::new(p.PIN_13, Level::Low);
-    let led_play1 = Output::new(p.PIN_12, Level::Low);
-    let mut pot0 = Channel::new_pin(p.PIN_26, Pull::None);
-    let mut pot1 = Channel::new_pin(p.PIN_27, Pull::None);
-    let encoder = init_encoder(&mut common, sm0, p.PIN_2, p.PIN_3);
+    let deck_switch = Input::new(p.PIN_22, Pull::Up);
+    let play_button0 = Input::new(p.PIN_14, Pull::Up);
+    let play_button1 = Input::new(p.PIN_15, Pull::Up);
+    let play_led0 = Output::new(p.PIN_13, Level::Low);
+    let play_led1 = Output::new(p.PIN_12, Level::Low);
+    let mut volume_pot0 = Channel::new_pin(p.PIN_26, Pull::None);
+    let mut volume_pot1 = Channel::new_pin(p.PIN_27, Pull::None);
+    let load_encoder = init_encoder(&mut common, sm0, p.PIN_2, p.PIN_3);
 
     spawner.spawn(display_manager_task(display).unwrap());
-    spawner.spawn(deck_switch_task(switch).unwrap());
-    spawner.spawn(encoder_task(encoder).unwrap());
-    spawner.spawn(play_button_task(play0, 0).unwrap());
-    spawner.spawn(play_button_task(play1, 1).unwrap());
-    spawner.spawn(play_led_task(led_play0, 0).unwrap());
-    spawner.spawn(play_led_task(led_play1, 1).unwrap());
+    spawner.spawn(deck_switch_task(deck_switch).unwrap());
+    spawner.spawn(encoder_task(load_encoder).unwrap());
+    spawner.spawn(play_button_task(play_button0, 0).unwrap());
+    spawner.spawn(play_button_task(play_button1, 1).unwrap());
+    spawner.spawn(play_led_task(play_led0, 0).unwrap());
+    spawner.spawn(play_led_task(play_led1, 1).unwrap());
 
     // Inizialize EMA filter and other variables for ADC
-    let init_pot0 = read_adc_averaged(&mut adc, &mut pot0).await;
-    let init_pot1 = read_adc_averaged(&mut adc, &mut pot1).await;
+    let init_pot0 = read_adc_averaged(&mut adc, &mut volume_pot0).await;
+    let init_pot1 = read_adc_averaged(&mut adc, &mut volume_pot1).await;
     let mut ema_pot0: f32 = init_pot0 as f32;
     let mut ema_pot1: f32 = init_pot1 as f32;
     let alpha: f32 = 0.5; // 0.0 = very slow, 1.0 = no filter
@@ -443,8 +443,8 @@ async fn main(spawner: Spawner) {
 
     loop {
         // Async averaged adc read
-        let raw_pot0 = read_adc_averaged(&mut adc, &mut pot0).await;
-        let raw_pot1 = read_adc_averaged(&mut adc, &mut pot1).await;
+        let raw_pot0 = read_adc_averaged(&mut adc, &mut volume_pot0).await;
+        let raw_pot1 = read_adc_averaged(&mut adc, &mut volume_pot1).await;
 
         // Send only new values
         if last_pot0 != raw_pot0 || last_pot1 != raw_pot1 {
