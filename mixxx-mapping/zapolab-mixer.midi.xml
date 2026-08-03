@@ -1,9 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8" ?>
 <MixxxControllerPreset mixxxVersion="2.5.0" schemaVersion="1">
   <info>
     <name>zapolab mixer</name>
     <author>zapolab</author>
-    <description>Mapping for the zapolab RP2040 MIDI mixer: two volume faders, two play/pause buttons with LED feedback, a load button per deck and a library scroll encoder. Everything sits on MIDI channel 1.</description>
+    <description
+    >Mapping for the zapolab RP2040 MIDI mixer: two volume faders, two play/pause buttons with LED feedback, a load button per deck and a library scroll encoder. Everything sits on MIDI channel 1.</description>
     <wiki>https://github.com/zapolab/midi-mixer</wiki>
   </info>
   <!-- id must match the USB MIDI product string on firmware advertises -->
@@ -17,7 +18,7 @@
         <status>0xB0</status>
         <midino>0x00</midino>
         <options>
-          <normal/>
+          <normal />
         </options>
       </control>
       <control>
@@ -27,7 +28,7 @@
         <status>0xB0</status>
         <midino>0x01</midino>
         <options>
-          <normal/>
+          <normal />
         </options>
       </control>
       <!--
@@ -41,7 +42,7 @@
         <status>0xB0</status>
         <midino>0x10</midino>
         <options>
-          <selectknob/>
+          <selectknob />
         </options>
       </control>
       <!-- Buttons: Note On 0x00-0x1F -->
@@ -52,7 +53,7 @@
         <status>0x90</status>
         <midino>0x00</midino>
         <options>
-          <normal/>
+          <normal />
         </options>
       </control>
       <control>
@@ -62,7 +63,7 @@
         <status>0x90</status>
         <midino>0x01</midino>
         <options>
-          <normal/>
+          <normal />
         </options>
       </control>
       <!-- Load: the firmware decides to send 0x02 or 0x03 based on deck switch value. -->
@@ -73,7 +74,7 @@
         <status>0x90</status>
         <midino>0x02</midino>
         <options>
-          <normal/>
+          <normal />
         </options>
       </control>
       <control>
@@ -83,7 +84,7 @@
         <status>0x90</status>
         <midino>0x03</midino>
         <options>
-          <normal/>
+          <normal />
         </options>
       </control>
     </controls>
