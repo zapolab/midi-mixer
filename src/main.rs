@@ -620,6 +620,8 @@ async fn main(spawner: Spawner) {
     let alpha: f32 = 0.5; // 0.0 = very slow, 1.0 = no filter
     let mut last_pot0: u16 = 0;
     let mut last_pot1: u16 = 0;
+    let mut last_midi_pot0: u8 = 0xFF;
+    let mut last_midi_pot1: u8 = 0xFF;
 
     // Boot done
     status_led.set_low();
@@ -650,6 +652,27 @@ async fn main(spawner: Spawner) {
                 midi_range_pot0: filtered_to_midi_range(filtered_pot0),
                 midi_range_pot1: filtered_to_midi_range(filtered_pot1),
             };
+
+            send_midi(MidiMsg::ControlChange {
+                cc: 0x00,
+                value: data.midi_range_pot0,
+            });
+
+            // Emit a CC only when the 7-bit value actually moves.
+            if data.midi_range_pot0 != last_midi_pot0 {
+                last_midi_pot0 = data.midi_range_pot0;
+                send_midi(MidiMsg::ControlChange {
+                    cc: 0x00,
+                    value: data.midi_range_pot0,
+                });
+            }
+            if data.midi_range_pot1 != last_midi_pot1 {
+                last_midi_pot1 = data.midi_range_pot1;
+                send_midi(MidiMsg::ControlChange {
+                    cc: 0x01,
+                    value: data.midi_range_pot1,
+                });
+            }
 
             // Send latest data to channel
             if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPot(data)) {
