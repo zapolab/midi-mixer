@@ -278,6 +278,25 @@ async fn display_manager_task(
                 .draw(&mut display)
                 .unwrap();
             }
+            DisplayCmd::DrawLoad(data) => {
+                display
+                    .fill_solid(
+                        &Rectangle::new(Point::new(0, 40), Size::new(18, 10)),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
+
+                // 8-char buffer
+                let mut buf: String<8> = String::new();
+
+                let deck = SELECTED_DECK.load(Ordering::Relaxed);
+
+                write!(buf, "{} {}", data, deck).unwrap();
+
+                Text::with_baseline(buf.as_str(), Point::new(0, 40), text_style, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
+            }
         }
         display.flush().unwrap();
     }
