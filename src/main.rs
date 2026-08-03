@@ -389,6 +389,12 @@ async fn load_encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
         let data = if quarter > 0 { 1 } else { 0 };
         quarter = 0;
 
+        // CC 0x10, 0x41 up, 0x3F down.
+        send_midi(MidiMsg::ControlChange {
+            cc: 0x10,
+            value: if data == 1 { 0x41 } else { 0x3F },
+        });
+
         if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawDirection(data)) {
             warn!("Channel full!");
         }
@@ -406,13 +412,19 @@ async fn load_button_task(mut button: Input<'static>) {
 
     loop {
         button.wait_for_low().await;
-        // Send MIDI
+        // Note 0x02 or 0x03
+        let note = 0x02 + SELECTED_DECK.load(Ordering::Relaxed);
+        send_midi(MidiMsg::NoteOn {
+            note,
+            velocity: 0x7F,
+        });
 
         if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(1)) {
             warn!("Channel full!");
         }
 
         button.wait_for_high().await;
+        send_midi(MidiMsg::NoteOff { note });
 
         if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(0)) {
             warn!("Channel full!");
