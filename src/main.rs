@@ -119,6 +119,13 @@ fn send_midi(msg: MidiMsg) {
     }
 }
 
+/// Push a draw command to the display task
+fn send_display(cmd: DisplayCmd) {
+    if DISPLAY_CHANNEL.try_send(cmd).is_err() {
+        warn!("Display channel full!");
+    }
+}
+
 /// Starts the state machine for the encoder
 // Logic by AI
 fn init_encoder(
@@ -345,9 +352,7 @@ async fn deck_switch_task(mut switch: Input<'static>) {
 
     // Send update to channel
     let data = SELECTED_DECK.load(Ordering::Relaxed);
-    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawSelectedDeck(data)) {
-        warn!("Channel full!");
-    }
+    send_display(DisplayCmd::DrawSelectedDeck(data));
 
     loop {
         switch.wait_for_any_edge().await;
@@ -358,9 +363,7 @@ async fn deck_switch_task(mut switch: Input<'static>) {
         }
 
         let data = SELECTED_DECK.load(Ordering::Relaxed);
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawSelectedDeck(data)) {
-            warn!("Channel full!");
-        }
+        send_display(DisplayCmd::DrawSelectedDeck(data));
     }
 }
 
@@ -395,9 +398,7 @@ async fn load_encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
             value: if data == 1 { 0x41 } else { 0x3F },
         });
 
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawDirection(data)) {
-            warn!("Channel full!");
-        }
+        send_display(DisplayCmd::DrawDirection(data));
     }
 }
 
@@ -406,9 +407,7 @@ async fn load_encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
 async fn load_button_task(mut button: Input<'static>) {
     // Actual logic will send MIDI Note On/Off signal
 
-    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(0)) {
-        warn!("Channel full!");
-    }
+    send_display(DisplayCmd::DrawLoad(0));
 
     loop {
         button.wait_for_low().await;
@@ -419,16 +418,12 @@ async fn load_button_task(mut button: Input<'static>) {
             velocity: 0x7F,
         });
 
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(1)) {
-            warn!("Channel full!");
-        }
+        send_display(DisplayCmd::DrawLoad(1));
 
         button.wait_for_high().await;
         send_midi(MidiMsg::NoteOff { note });
 
-        if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawLoad(0)) {
-            warn!("Channel full!");
-        }
+        send_display(DisplayCmd::DrawLoad(0));
     }
 }
 
@@ -436,9 +431,7 @@ async fn load_button_task(mut button: Input<'static>) {
 // One instance per deck, so the pool must hold both.
 #[embassy_executor::task(pool_size = 2)]
 async fn play_button_task(mut button: Input<'static>, channel: usize) {
-    if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPlayState(false, channel)) {
-        warn!("Channel full!");
-    }
+    send_display(DisplayCmd::DrawPlayState(false, channel));
 
     loop {
         button.wait_for_low().await;
@@ -523,12 +516,7 @@ async fn midi_rx_task(mut receiver: Receiver<'static, Driver<'static, USB>>) {
                     0x22 | 0x23 => {
                         let deck = (note - 0x22) as usize;
                         PLAY_STATE[deck].store(on, Ordering::Relaxed);
-                        if DISPLAY_CHANNEL
-                            .try_send(DisplayCmd::DrawPlayState(on, deck))
-                            .is_err()
-                        {
-                            warn!("Channel full!");
-                        }
+                        send_display(DisplayCmd::DrawPlayState(on, deck));
                     }
                     _ => {}
                 }
@@ -653,11 +641,6 @@ async fn main(spawner: Spawner) {
                 midi_range_pot1: filtered_to_midi_range(filtered_pot1),
             };
 
-            send_midi(MidiMsg::ControlChange {
-                cc: 0x00,
-                value: data.midi_range_pot0,
-            });
-
             // Emit a CC only when the 7-bit value actually moves.
             if data.midi_range_pot0 != last_midi_pot0 {
                 last_midi_pot0 = data.midi_range_pot0;
@@ -675,9 +658,7 @@ async fn main(spawner: Spawner) {
             }
 
             // Send latest data to channel
-            if let Err(_) = DISPLAY_CHANNEL.try_send(DisplayCmd::DrawPot(data)) {
-                warn!("Channel full!");
-            }
+            send_display(DisplayCmd::DrawPot(data));
         }
 
         Timer::after(Duration::from_millis(50)).await;
