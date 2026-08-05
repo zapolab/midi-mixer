@@ -30,16 +30,8 @@ pub(crate) type Display = Ssd1306<
 >;
 
 /// Struct for potentiometer read values
-#[derive(Clone, Copy)] // needed for not losing ownership when sending into channel
-pub(crate) struct PotReadings {
-    pub(crate) filtered: u16,
-    pub(crate) percentage: u8,
-    pub(crate) midi_range: u8,
-}
-
-/// Struct for potentiometer read values
 pub(crate) enum DisplayCmd {
-    DrawPot(PotReadings, usize),
+    DrawPot(u8, usize),
     DrawSelectedDeck(u8),
     DrawDirection(u8),
     DrawPlayState(bool, usize),
@@ -60,6 +52,11 @@ const SMALL_STYLE: MonoTextStyle<'_, BinaryColor> = MonoTextStyleBuilder::new()
     .font(&FONT_6X10)
     .text_color(BinaryColor::On)
     .build();
+
+// Volume bar geometry
+const VOLUME_BAR_TOP: i32 = 26;
+const VOLUME_BAR_WIDTH: u32 = 10;
+const VOLUME_BAR_HEIGHT: u32 = 76;
 
 /// Push a draw command to the display task
 pub(crate) fn send_display(cmd: DisplayCmd) {
@@ -126,32 +123,31 @@ pub(crate) async fn display_manager_task(mut display: Display) {
         let cmd = DISPLAY_CHANNEL.receive().await;
         match cmd {
             DisplayCmd::DrawPot(data, channel) => {
-                // let y = if channel == 0 { 0 } else { 10 };
+                let x = if channel == 0 { 2 } else { 52 };
 
-                // display
-                //     .fill_solid(
-                //         &Rectangle::new(Point::new(0, y), Size::new(128, 10)),
-                //         BinaryColor::Off,
-                //     )
-                //     .unwrap();
+                // Map MIDI value to VOLUME_BAR_HEIGHT pixels
+                let filled = (data as u32 * VOLUME_BAR_HEIGHT / 127).min(VOLUME_BAR_HEIGHT);
+                let empty = VOLUME_BAR_HEIGHT - filled;
 
-                // // 8-char buffer
-                // let mut buf: String<8> = String::new();
+                display
+                    .fill_solid(
+                        &Rectangle::new(
+                            Point::new(x, VOLUME_BAR_TOP),
+                            Size::new(VOLUME_BAR_WIDTH, VOLUME_BAR_HEIGHT),
+                        ),
+                        BinaryColor::On,
+                    )
+                    .unwrap();
 
-                // write!(buf, "{}", data.filtered).unwrap();
-                // Text::with_baseline(buf.as_str(), Point::new(0, y), text_style, Baseline::Top)
-                //     .draw(&mut display)
-                //     .unwrap();
-                // buf.clear();
-                // write!(buf, "{}%", data.percentage).unwrap();
-                // Text::with_baseline(buf.as_str(), Point::new(32, y), text_style, Baseline::Top)
-                //     .draw(&mut display)
-                //     .unwrap();
-                // buf.clear();
-                // write!(buf, "{} MIDI", data.midi_range).unwrap();
-                // Text::with_baseline(buf.as_str(), Point::new(64, y), text_style, Baseline::Top)
-                //     .draw(&mut display)
-                //     .unwrap();
+                display
+                    .fill_solid(
+                        &Rectangle::new(
+                            Point::new(x, VOLUME_BAR_TOP),
+                            Size::new(VOLUME_BAR_WIDTH, empty),
+                        ),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
             }
             DisplayCmd::DrawSelectedDeck(data) => {
                 // display
