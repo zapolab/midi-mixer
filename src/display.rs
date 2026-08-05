@@ -11,12 +11,12 @@ use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embedded_graphics::{
     mono_font::{
         MonoTextStyle, MonoTextStyleBuilder,
-        ascii::{FONT_6X10, FONT_10X20},
+        ascii::{FONT_6X10, FONT_9X15_BOLD, FONT_10X20},
     },
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
-    text::{Baseline, Text},
+    text::{Alignment, Baseline, Text},
 };
 use heapless::String;
 use ssd1306::{Ssd1306, mode::BufferedGraphicsMode, prelude::*, size::DisplaySize128x64};
@@ -48,6 +48,19 @@ pub(crate) enum DisplayCmd {
 
 static DISPLAY_CHANNEL: Channel<ThreadModeRawMutex, DisplayCmd, 8> = Channel::new();
 
+const TITLE_STYLE: MonoTextStyle<'_, BinaryColor> = MonoTextStyleBuilder::new()
+    .font(&FONT_10X20)
+    .text_color(BinaryColor::On)
+    .build();
+const MEDIUM_STYLE: MonoTextStyle<'_, BinaryColor> = MonoTextStyleBuilder::new()
+    .font(&FONT_9X15_BOLD)
+    .text_color(BinaryColor::On)
+    .build();
+const SMALL_STYLE: MonoTextStyle<'_, BinaryColor> = MonoTextStyleBuilder::new()
+    .font(&FONT_6X10)
+    .text_color(BinaryColor::On)
+    .build();
+
 /// Push a draw command to the display task
 pub(crate) fn send_display(cmd: DisplayCmd) {
     if DISPLAY_CHANNEL.try_send(cmd).is_err() {
@@ -55,15 +68,37 @@ pub(crate) fn send_display(cmd: DisplayCmd) {
     }
 }
 
+/// Draw boot graphics onto the display
+pub(crate) fn draw_splash(target: &mut Display) {
+    target.clear(BinaryColor::Off).unwrap();
+    target.flush().unwrap();
+
+    Text::with_baseline("zapolab", Point::new(0, 43), MEDIUM_STYLE, Baseline::Top)
+        .draw(target)
+        .unwrap();
+    Text::with_alignment(
+        "RP2040\nMIDI mixer",
+        Point::new(32, 76),
+        SMALL_STYLE,
+        Alignment::Center,
+    )
+    .draw(target)
+    .unwrap();
+
+    target.flush().unwrap();
+}
+
 /// Draw mixer layout onto the display
-fn draw_mixer(text_style: MonoTextStyle<'_, BinaryColor>, target: &mut Display) {
-    Text::with_baseline("1", Point::new(2, 0), text_style, Baseline::Top)
+fn draw_mixer(target: &mut Display) {
+    target.clear(BinaryColor::Off).unwrap();
+
+    Text::with_baseline("1", Point::new(2, 0), TITLE_STYLE, Baseline::Top)
         .draw(target)
         .unwrap();
-    Text::with_baseline("M", Point::new(27, 0), text_style, Baseline::Top)
+    Text::with_baseline("M", Point::new(27, 0), TITLE_STYLE, Baseline::Top)
         .draw(target)
         .unwrap();
-    Text::with_baseline("2", Point::new(52, 0), text_style, Baseline::Top)
+    Text::with_baseline("2", Point::new(52, 0), TITLE_STYLE, Baseline::Top)
         .draw(target)
         .unwrap();
 
@@ -83,16 +118,7 @@ fn draw_mixer(text_style: MonoTextStyle<'_, BinaryColor>, target: &mut Display) 
 /// Async task managing display writing requests
 #[embassy_executor::task]
 pub(crate) async fn display_manager_task(mut display: Display) {
-    let style_title = MonoTextStyleBuilder::new()
-        .font(&FONT_10X20)
-        .text_color(BinaryColor::On)
-        .build();
-    let style_small = MonoTextStyleBuilder::new()
-        .font(&FONT_6X10)
-        .text_color(BinaryColor::On)
-        .build();
-
-    draw_mixer(style_title, &mut display);
+    draw_mixer(&mut display);
 
     info!("Display ready.");
 

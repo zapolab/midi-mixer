@@ -18,7 +18,6 @@ use embassy_rp::{
 };
 use embassy_time::{Duration, Timer};
 use embassy_usb::{Builder, Config as USBConfig, class::midi::MidiClass};
-use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 use ssd1306::{
     I2CDisplayInterface, Ssd1306, prelude::*, rotation::DisplayRotation, size::DisplaySize128x64,
 };
@@ -32,7 +31,7 @@ use crate::{
         play::{play_button_task, play_led_task},
         volume::{init_adc, volume_pot_task},
     },
-    display::display_manager_task,
+    display::{display_manager_task, draw_splash},
     midi::{midi_rx_task, midi_tx_task, usb_task},
 };
 
@@ -60,8 +59,7 @@ async fn main(spawner: Spawner) {
     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate90)
         .into_buffered_graphics_mode();
     display.init().unwrap();
-    display.clear(BinaryColor::Off).unwrap();
-    display.flush().unwrap();
+    draw_splash(&mut display);
 
     // USB configuration
     let driver = Driver::new(p.USB, Irqs);
@@ -107,10 +105,15 @@ async fn main(spawner: Spawner) {
     let volume_pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let volume_pot1 = Channel::new_pin(p.PIN_27, Pull::None);
 
-    // Task initialization
+    // USB task initialization
     spawner.spawn(usb_task(usb).unwrap());
     spawner.spawn(midi_tx_task(midi_sender).unwrap());
     spawner.spawn(midi_rx_task(midi_receiver).unwrap());
+
+    // 3 seconds long splash screen
+    Timer::after(Duration::from_secs(3)).await;
+
+    // Other task initialization
     spawner.spawn(display_manager_task(display).unwrap());
     spawner.spawn(deck_switch_task(deck_switch).unwrap());
     spawner.spawn(play_button_task(play_button0, 0).unwrap());
