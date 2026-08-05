@@ -15,7 +15,7 @@ use embedded_graphics::{
     },
     pixelcolor::BinaryColor,
     prelude::*,
-    primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
+    primitives::{PrimitiveStyle, Rectangle, StyledDrawable, Triangle},
     text::{Alignment, Baseline, Text},
 };
 use heapless::String;
@@ -40,6 +40,7 @@ pub(crate) enum DisplayCmd {
 
 static DISPLAY_CHANNEL: Channel<ThreadModeRawMutex, DisplayCmd, 8> = Channel::new();
 
+// Font styles
 const TITLE_STYLE: MonoTextStyle<'_, BinaryColor> = MonoTextStyleBuilder::new()
     .font(&FONT_10X20)
     .text_color(BinaryColor::On)
@@ -57,6 +58,10 @@ const SMALL_STYLE: MonoTextStyle<'_, BinaryColor> = MonoTextStyleBuilder::new()
 const VOLUME_BAR_TOP: i32 = 26;
 const VOLUME_BAR_WIDTH: u32 = 10;
 const VOLUME_BAR_HEIGHT: u32 = 76;
+
+// Play/pause icon geometry
+const ICON_TOP: i32 = 111;
+const ICON_SIZE: Size = Size::new(12, 15);
 
 /// Push a draw command to the display task
 pub(crate) fn send_display(cmd: DisplayCmd) {
@@ -185,37 +190,33 @@ pub(crate) async fn display_manager_task(mut display: Display) {
                 //     .unwrap();
             }
             DisplayCmd::DrawPlayState(state, channel) => {
-                // display
-                //     .fill_solid(
-                //         &Rectangle::new(
-                //             if channel == 0 {
-                //                 Point::new(0, 30)
-                //             } else {
-                //                 Point::new(36, 30)
-                //             },
-                //             Size::new(30, 10),
-                //         ),
-                //         BinaryColor::Off,
-                //     )
-                //     .unwrap();
+                let x = if channel == 0 { 1 } else { 51 };
+                let origin = Point::new(x, ICON_TOP);
+                let style = PrimitiveStyle::with_fill(BinaryColor::On);
 
-                // // 8-char buffer
-                // let mut buf: String<8> = String::new();
+                // Own region, cleared before every redraw
+                display
+                    .fill_solid(&Rectangle::new(origin, ICON_SIZE), BinaryColor::Off)
+                    .unwrap();
 
-                // write!(buf, "{}", state).unwrap();
-
-                // Text::with_baseline(
-                //     buf.as_str(),
-                //     if channel == 0 {
-                //         Point::new(0, 30)
-                //     } else {
-                //         Point::new(36, 30)
-                //     },
-                //     text_style,
-                //     Baseline::Top,
-                // )
-                // .draw(&mut display)
-                // .unwrap();
+                if state {
+                    // Pause: two bars
+                    Rectangle::new(origin, Size::new(5, 15))
+                        .draw_styled(&style, &mut display)
+                        .unwrap();
+                    Rectangle::new(origin + Point::new(7, 0), Size::new(5, 15))
+                        .draw_styled(&style, &mut display)
+                        .unwrap();
+                } else {
+                    // Play: triangle
+                    Triangle::new(
+                        origin,
+                        origin + Point::new(0, 14),
+                        origin + Point::new(11, 7),
+                    )
+                    .draw_styled(&style, &mut display)
+                    .unwrap();
+                }
             }
             DisplayCmd::DrawLoad(data) => {
                 // display
