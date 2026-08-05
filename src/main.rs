@@ -51,6 +51,9 @@ async fn main(spawner: Spawner) {
     // Boot sentinel
     let mut status_led = Output::new(p.PIN_25, Level::High);
 
+    // Enable PWM SMPS mode
+    let _smps_pwm = Output::new(p.PIN_23, Level::High);
+
     let adc = init_adc(Adc::new(p.ADC, Irqs, AdcConfig::default()));
     let i2c = I2c::new_async(p.I2C0, p.PIN_17, p.PIN_16, Irqs, I2cConfig::default());
 
