@@ -76,6 +76,8 @@ fn draw_mixer(text_style: MonoTextStyle<'_, BinaryColor>, target: &mut Display) 
     Rectangle::new(Point::new(50, 24), Size::new(14, 80))
         .draw_styled(&PrimitiveStyle::with_stroke(BinaryColor::On, 1), target)
         .unwrap();
+
+    target.flush().unwrap();
 }
 
 /// Async task managing display writing requests
