@@ -1,7 +1,6 @@
 //! SSD1306
 //! Producers never draw directly, they push a [`DisplayCmd`] through [`send_display`].
 
-use core::{fmt::Write, sync::atomic::Ordering};
 use defmt::{info, warn};
 use embassy_rp::{
     i2c::{Async, I2c},
@@ -18,10 +17,7 @@ use embedded_graphics::{
     primitives::{PrimitiveStyle, Rectangle, StyledDrawable, Triangle},
     text::{Alignment, Baseline, Text},
 };
-use heapless::String;
 use ssd1306::{Ssd1306, mode::BufferedGraphicsMode, prelude::*, size::DisplaySize128x64};
-
-use crate::state::SELECTED_DECK;
 
 pub(crate) type Display = Ssd1306<
     I2CInterface<I2c<'static, I2C0, Async>>,
@@ -33,9 +29,7 @@ pub(crate) type Display = Ssd1306<
 pub(crate) enum DisplayCmd {
     DrawPot(u8, usize),
     DrawSelectedDeck(u8),
-    DrawDirection(u8),
     DrawPlayState(bool, usize),
-    DrawLoad(u8),
 }
 
 static DISPLAY_CHANNEL: Channel<ThreadModeRawMutex, DisplayCmd, 8> = Channel::new();
@@ -168,27 +162,6 @@ pub(crate) async fn display_manager_task(mut display: Display) {
                     .draw(&mut display)
                     .unwrap();
             }
-            DisplayCmd::DrawDirection(data) => {
-                // display
-                //     .fill_solid(
-                //         &Rectangle::new(Point::new(12, 20), Size::new(24, 10)),
-                //         BinaryColor::Off,
-                //     )
-                //     .unwrap();
-
-                // // 8-char buffer
-                // let mut buf: String<8> = String::new();
-
-                // if data == 1 {
-                //     write!(buf, "UP").unwrap();
-                // } else {
-                //     write!(buf, "DOWN").unwrap();
-                // }
-
-                // Text::with_baseline(buf.as_str(), Point::new(12, 20), text_style, Baseline::Top)
-                //     .draw(&mut display)
-                //     .unwrap();
-            }
             DisplayCmd::DrawPlayState(state, channel) => {
                 let x = if channel == 0 { 1 } else { 51 };
                 let origin = Point::new(x, ICON_TOP);
@@ -217,25 +190,6 @@ pub(crate) async fn display_manager_task(mut display: Display) {
                     .draw_styled(&style, &mut display)
                     .unwrap();
                 }
-            }
-            DisplayCmd::DrawLoad(data) => {
-                // display
-                //     .fill_solid(
-                //         &Rectangle::new(Point::new(0, 40), Size::new(18, 10)),
-                //         BinaryColor::Off,
-                //     )
-                //     .unwrap();
-
-                // // 8-char buffer
-                // let mut buf: String<8> = String::new();
-
-                // let deck = SELECTED_DECK.load(Ordering::Relaxed);
-
-                // write!(buf, "{} {}", data, deck).unwrap();
-
-                // Text::with_baseline(buf.as_str(), Point::new(0, 40), text_style, Baseline::Top)
-                //     .draw(&mut display)
-                //     .unwrap();
             }
         }
         display.flush().unwrap();

@@ -15,7 +15,6 @@ use embassy_rp::{
 };
 
 use crate::{
-    display::{DisplayCmd, send_display},
     midi::{MidiMsg, send_midi},
     state::SELECTED_DECK,
 };
@@ -100,18 +99,12 @@ pub(crate) async fn load_encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
             cc: 0x10,
             value: if data == 1 { 0x41 } else { 0x3F },
         });
-
-        send_display(DisplayCmd::DrawDirection(data));
     }
 }
 
 /// Async task reading load button press
 #[embassy_executor::task]
 pub(crate) async fn load_button_task(mut button: Input<'static>) {
-    // Actual logic will send MIDI Note On/Off signal
-
-    send_display(DisplayCmd::DrawLoad(0));
-
     loop {
         button.wait_for_low().await;
         // Note 0x02 or 0x03
@@ -121,11 +114,7 @@ pub(crate) async fn load_button_task(mut button: Input<'static>) {
             velocity: 0x7F,
         });
 
-        send_display(DisplayCmd::DrawLoad(1));
-
         button.wait_for_high().await;
         send_midi(MidiMsg::NoteOff { note });
-
-        send_display(DisplayCmd::DrawLoad(0));
     }
 }
