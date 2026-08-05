@@ -113,8 +113,8 @@ async fn main(spawner: Spawner) {
     spawner.spawn(midi_tx_task(midi_sender).unwrap());
     spawner.spawn(midi_rx_task(midi_receiver).unwrap());
 
-    // 3 seconds long splash screen
-    Timer::after(Duration::from_secs(3)).await;
+    // 4 seconds long splash screen
+    Timer::after(Duration::from_secs(4)).await;
 
     // Other task initialization
     spawner.spawn(display_manager_task(display).unwrap());
