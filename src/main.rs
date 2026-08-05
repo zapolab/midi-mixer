@@ -57,7 +57,7 @@ async fn main(spawner: Spawner) {
 
     // Display initialization
     let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate90)
         .into_buffered_graphics_mode();
     display.init().unwrap();
     display.clear(BinaryColor::Off).unwrap();
