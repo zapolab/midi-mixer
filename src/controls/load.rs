@@ -94,10 +94,9 @@ pub(crate) async fn load_encoder_task(mut sm: StateMachine<'static, PIO0, 0>) {
         let data = if quarter > 0 { 1 } else { 0 };
         quarter = 0;
 
-        // CC 0x10, 0x41 up, 0x3F down.
         send_midi(MidiMsg::ControlChange {
             cc: 0x10,
-            value: if data == 1 { 0x41 } else { 0x3F },
+            value: if data == 1 { 0x01 } else { 0x7F },
         });
     }
 }
