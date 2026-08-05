@@ -33,7 +33,7 @@
       </control>
       <!--
         Encoders: CC 0x10-0x1F.
-        Firmware sends 0x41 UP and 0x3F DOWN
+        Firmware sends 0x01 UP and 0x7F DOWN
       -->
       <control>
         <group>[Library]</group>
