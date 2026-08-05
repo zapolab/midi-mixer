@@ -150,20 +150,18 @@ pub(crate) async fn display_manager_task(mut display: Display) {
                     .unwrap();
             }
             DisplayCmd::DrawSelectedDeck(data) => {
-                // display
-                //     .fill_solid(
-                //         &Rectangle::new(Point::new(0, 20), Size::new(6, 10)),
-                //         BinaryColor::Off,
-                //     )
-                //     .unwrap();
+                let s = if data == 0 { "<<<" } else { ">>>" };
 
-                // // 1-char buffer
-                // let mut buf: String<1> = String::new();
+                display
+                    .fill_solid(
+                        &Rectangle::new(Point::new(19, 85), Size::new(27, 15)),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
 
-                // write!(buf, "{}", data).unwrap();
-                // Text::with_baseline(buf.as_str(), Point::new(0, 20), text_style, Baseline::Top)
-                //     .draw(&mut display)
-                //     .unwrap();
+                Text::with_baseline(s, Point::new(19, 85), MEDIUM_STYLE, Baseline::Top)
+                    .draw(&mut display)
+                    .unwrap();
             }
             DisplayCmd::DrawDirection(data) => {
                 // display
