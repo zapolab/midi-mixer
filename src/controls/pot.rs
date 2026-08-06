@@ -89,7 +89,7 @@ pub(crate) async fn pot_task(
                     cc: match channel {
                         Some(0) => 0x00,
                         Some(1) => 0x01,
-                        _ => 0x10,
+                        _ => 0x02,
                     },
                     value: data,
                 });
