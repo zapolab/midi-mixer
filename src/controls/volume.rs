@@ -54,8 +54,8 @@ fn map_raw(raw: u16) -> u16 {
 
 /// Async task reading one potentiometer
 // One instance per pot, so the pool must hold them all.
-#[embassy_executor::task(pool_size = 2)]
-pub(crate) async fn volume_pot_task(
+#[embassy_executor::task(pool_size = 3)]
+pub(crate) async fn pot_task(
     adc: &'static SharedAdc,
     mut pot: Channel<'static>,
     channel: usize,
