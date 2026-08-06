@@ -3,4 +3,4 @@
 pub(crate) mod deck;
 pub(crate) mod load;
 pub(crate) mod play;
-pub(crate) mod volume;
+pub(crate) mod pot;

@@ -29,7 +29,7 @@ use crate::{
         deck::deck_switch_task,
         load::{init_encoder, load_button_task, load_encoder_task},
         play::{play_button_task, play_led_task},
-        volume::{init_adc, pot_task},
+        pot::{init_adc, pot_task},
     },
     display::{display_manager_task, draw_splash},
     midi::{midi_rx_task, midi_tx_task, usb_task},
