@@ -4,13 +4,22 @@
     <name>zapolab mixer</name>
     <author>zapolab</author>
     <description
-    >Mapping for the zapolab RP2040 MIDI mixer: two volume faders, two play/pause buttons with LED feedback, a load button per deck and a library scroll encoder. Everything sits on MIDI channel 1.</description>
+    >Mapping for the zapolab RP2040 MIDI mixer: two volume faders, a master gain, two play/pause buttons with LED feedback, a load button per deck, a library scroll encoder and a shift button. Everything sits on MIDI channel 1.</description>
     <wiki>https://github.com/zapolab/midi-mixer</wiki>
   </info>
-  <!-- id must match the USB MIDI product string on firmware advertises -->
+  <!-- id must match config.product in the firmware -->
   <controller id="RP2040 Mixer">
     <controls>
-      <!-- Potentiometers: CC 0x00-0x0F -->
+      <!--
+        Shift adds 0x10 to the midino, so unshifted controls
+        are in 0x00-0x0F and its shifted twin in 0x10-0x1F:
+
+        CC   0x00-0x07  pots       0x10-0x17  shifted
+        CC   0x08-0x0F  encoders   0x18-0x1F  shifted
+        Note 0x00-0x0F  buttons    0x10-0x1F  shifted
+        Note 0x20-0x2F  feedback from Mixxx, see (outputs)
+      -->
+      <!-- Pots -->
       <control>
         <group>[Channel1]</group>
         <key>volume</key>
@@ -36,26 +45,23 @@
         <key>gain</key>
         <description>Master output gain</description>
         <status>0xB0</status>
-        <midino>0x10</midino>
+        <midino>0x02</midino>
         <options>
           <normal />
         </options>
       </control>
-      <!--
-        Encoders: CC 0x10-0x1F.
-        Firmware sends 0x01 UP and 0x7F DOWN
-      -->
+      <!-- Encoders: 0x01 UP, 0x7F DOWN -->
       <control>
         <group>[Library]</group>
         <key>MoveVertical</key>
         <description>Scroll through the library</description>
         <status>0xB0</status>
-        <midino>0x11</midino>
+        <midino>0x08</midino>
         <options>
           <selectknob />
         </options>
       </control>
-      <!-- Buttons: Note On 0x00-0x1F -->
+      <!-- Buttons -->
       <control>
         <group>[Channel1]</group>
         <key>play</key>
@@ -76,27 +82,7 @@
           <normal />
         </options>
       </control>
-      <control>
-        <group>[Channel1]</group>
-        <key>cue_gotoandstop</key>
-        <description>Deck 1 CUE and STOP</description>
-        <status>0x90</status>
-        <midino>0x10</midino>
-        <options>
-          <normal />
-        </options>
-      </control>
-      <control>
-        <group>[Channel2]</group>
-        <key>cue_gotoandstop</key>
-        <description>Deck 2 CUE and STOP</description>
-        <status>0x90</status>
-        <midino>0x11</midino>
-        <options>
-          <normal />
-        </options>
-      </control>
-      <!-- Load: the firmware decides to send 0x02 or 0x03 based on deck switch value. -->
+      <!-- Load: the firmware picks the note from the deck switch -->
       <control>
         <group>[Channel1]</group>
         <key>LoadSelectedTrack</key>
@@ -117,9 +103,30 @@
           <normal />
         </options>
       </control>
+      <!-- Shifted buttons -->
+      <control>
+        <group>[Channel1]</group>
+        <key>cue_gotoandstop</key>
+        <description>Shift + deck 1 play: cue and stop</description>
+        <status>0x90</status>
+        <midino>0x10</midino>
+        <options>
+          <normal />
+        </options>
+      </control>
+      <control>
+        <group>[Channel2]</group>
+        <key>cue_gotoandstop</key>
+        <description>Shift + deck 2 play: cue and stop</description>
+        <status>0x90</status>
+        <midino>0x11</midino>
+        <options>
+          <normal />
+        </options>
+      </control>
     </controls>
     <outputs>
-      <!-- LED feedback: Note On 0x20-0x2F. -->
+      <!-- Feedback from Mixxx -->
       <output>
         <group>[Channel1]</group>
         <key>play_indicator</key>
