@@ -26,12 +26,12 @@ pub(crate) async fn play_button_task(mut button: Input<'static>, channel: usize)
             };
 
         send_midi(MidiMsg::NoteOn {
-            note: note,
+            note,
             velocity: 0x7F,
         });
 
         button.wait_for_high().await;
-        send_midi(MidiMsg::NoteOff { note: note });
+        send_midi(MidiMsg::NoteOff { note });
     }
 }
 
