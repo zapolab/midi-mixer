@@ -50,7 +50,7 @@
         <key>MoveVertical</key>
         <description>Scroll through the library</description>
         <status>0xB0</status>
-        <midino>0x10</midino>
+        <midino>0x11</midino>
         <options>
           <selectknob />
         </options>
