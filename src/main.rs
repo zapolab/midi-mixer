@@ -30,6 +30,7 @@ use crate::{
         load::{init_encoder, load_button_task, load_encoder_task},
         play::{play_button_task, play_led_task},
         pot::{init_adc, pot_task},
+        shift::shift_button_task,
     },
     display::{display_manager_task, draw_splash},
     midi::{midi_rx_task, midi_tx_task, usb_task},
@@ -98,6 +99,7 @@ async fn main(spawner: Spawner) {
     } = Pio::new(p.PIO0, Irqs);
 
     // Pins declaration
+    let shift_button = Input::new(p.PIN_18, Pull::Up);
     let deck_switch = Input::new(p.PIN_22, Pull::Up);
     let play_button0 = Input::new(p.PIN_14, Pull::Up);
     let play_button1 = Input::new(p.PIN_15, Pull::Up);
@@ -119,6 +121,7 @@ async fn main(spawner: Spawner) {
 
     // Other task initialization
     spawner.spawn(display_manager_task(display).unwrap());
+    spawner.spawn(shift_button_task(shift_button).unwrap());
     spawner.spawn(deck_switch_task(deck_switch).unwrap());
     spawner.spawn(play_button_task(play_button0, 0).unwrap());
     spawner.spawn(play_button_task(play_button1, 1).unwrap());

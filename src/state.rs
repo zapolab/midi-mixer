@@ -12,3 +12,5 @@ pub(crate) static PLAY_INDICATOR: [AtomicBool; 2] =
     [AtomicBool::new(false), AtomicBool::new(false)];
 /// Wakes the matching `play_led_task` after `PLAY_INDICATOR` changes
 pub(crate) static CHANGE_LED: [Signal<ThreadModeRawMutex, ()>; 2] = [Signal::new(), Signal::new()];
+/// Shift button state (true = pressed)
+pub(crate) static SHIFT_STATE: AtomicBool = AtomicBool::new(false);
