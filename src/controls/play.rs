@@ -4,9 +4,10 @@ use core::sync::atomic::Ordering;
 use embassy_rp::gpio::{Input, Output};
 
 use crate::{
+    controls::shift::SHIFT_OFFSET,
     display::{DisplayCmd, send_display},
     midi::{MidiMsg, send_midi},
-    state::{CHANGE_LED, PLAY_INDICATOR},
+    state::{CHANGE_LED, PLAY_INDICATOR, SHIFT_STATE},
 };
 
 /// Async task handling play/pause button press
@@ -17,15 +18,20 @@ pub(crate) async fn play_button_task(mut button: Input<'static>, channel: usize)
 
     loop {
         button.wait_for_low().await;
+        let note = channel as u8
+            + if SHIFT_STATE.load(Ordering::Relaxed) {
+                SHIFT_OFFSET
+            } else {
+                0
+            };
+
         send_midi(MidiMsg::NoteOn {
-            note: channel as u8,
+            note: note,
             velocity: 0x7F,
         });
 
         button.wait_for_high().await;
-        send_midi(MidiMsg::NoteOff {
-            note: channel as u8,
-        });
+        send_midi(MidiMsg::NoteOff { note: note });
     }
 }
 
