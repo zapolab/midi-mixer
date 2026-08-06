@@ -29,6 +29,7 @@ pub(crate) type Display = Ssd1306<
 /// Struct for potentiometer read values
 pub(crate) enum DisplayCmd {
     DrawPot(u8, usize),
+    DrawGain(u8),
     DrawSelectedDeck(u8),
     DrawPlayState(bool, usize),
 }
@@ -79,6 +80,10 @@ const TINY_STYLE: MonoTextStyle<'_, BinaryColor> = MonoTextStyleBuilder::new()
 const VOLUME_BAR_TOP: i32 = 26;
 const VOLUME_BAR_WIDTH: u32 = 10;
 const VOLUME_BAR_HEIGHT: u32 = 76;
+const GAIN_BAR_HEIGHT: u32 = 46;
+const GAIN_BAR_TOP_X: i32 = 27;
+const GAIN_BAR_TOP_Y: i32 = 26;
+const GAIN_BAR_WIDTH: u32 = 10;
 
 // Play/pause icon geometry
 const ICON_TOP: i32 = 111;
@@ -180,6 +185,31 @@ pub(crate) async fn display_manager_task(mut display: Display) {
                         &Rectangle::new(
                             Point::new(x, VOLUME_BAR_TOP),
                             Size::new(VOLUME_BAR_WIDTH, empty),
+                        ),
+                        BinaryColor::Off,
+                    )
+                    .unwrap();
+            }
+            DisplayCmd::DrawGain(data) => {
+                // Map MIDI value to GAIN_BAR_HEIGHT pixels
+                let filled = (data as u32 * GAIN_BAR_HEIGHT / 127).min(GAIN_BAR_HEIGHT);
+                let empty = GAIN_BAR_HEIGHT - filled;
+
+                display
+                    .fill_solid(
+                        &Rectangle::new(
+                            Point::new(GAIN_BAR_TOP_X, GAIN_BAR_TOP_Y),
+                            Size::new(GAIN_BAR_WIDTH, GAIN_BAR_HEIGHT),
+                        ),
+                        BinaryColor::On,
+                    )
+                    .unwrap();
+
+                display
+                    .fill_solid(
+                        &Rectangle::new(
+                            Point::new(GAIN_BAR_TOP_X, GAIN_BAR_TOP_Y),
+                            Size::new(GAIN_BAR_WIDTH, empty),
                         ),
                         BinaryColor::Off,
                     )
