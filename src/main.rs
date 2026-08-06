@@ -29,7 +29,7 @@ use crate::{
         deck::deck_switch_task,
         load::{init_encoder, load_button_task, load_encoder_task},
         play::{play_button_task, play_led_task},
-        volume::{init_adc, volume_pot_task},
+        pot::{init_adc, pot_task},
     },
     display::{display_manager_task, draw_splash},
     midi::{midi_rx_task, midi_tx_task, usb_task},
@@ -107,6 +107,7 @@ async fn main(spawner: Spawner) {
     let load_button = Input::new(p.PIN_21, Pull::Up);
     let volume_pot0 = Channel::new_pin(p.PIN_26, Pull::None);
     let volume_pot1 = Channel::new_pin(p.PIN_27, Pull::None);
+    let gain_pot = Channel::new_pin(p.PIN_28, Pull::None);
 
     // USB task initialization
     spawner.spawn(usb_task(usb).unwrap());
@@ -125,8 +126,9 @@ async fn main(spawner: Spawner) {
     spawner.spawn(play_led_task(play_led1, 1).unwrap());
     spawner.spawn(load_encoder_task(load_encoder).unwrap());
     spawner.spawn(load_button_task(load_button).unwrap());
-    spawner.spawn(volume_pot_task(adc, volume_pot0, 0).unwrap());
-    spawner.spawn(volume_pot_task(adc, volume_pot1, 1).unwrap());
+    spawner.spawn(pot_task(adc, volume_pot0, Some(0)).unwrap());
+    spawner.spawn(pot_task(adc, volume_pot1, Some(1)).unwrap());
+    spawner.spawn(pot_task(adc, gain_pot, None).unwrap());
 
     // Boot done
     status_led.set_low();

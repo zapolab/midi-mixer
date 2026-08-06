@@ -54,11 +54,11 @@ fn map_raw(raw: u16) -> u16 {
 
 /// Async task reading one potentiometer
 // One instance per pot, so the pool must hold them all.
-#[embassy_executor::task(pool_size = 2)]
-pub(crate) async fn volume_pot_task(
+#[embassy_executor::task(pool_size = 3)]
+pub(crate) async fn pot_task(
     adc: &'static SharedAdc,
     mut pot: Channel<'static>,
-    channel: usize,
+    channel: Option<usize>,
 ) {
     // Inizialize EMA filter and other variables for ADC
     let mut ema: f32 = map_raw(read_adc_averaged(adc, &mut pot).await) as f32;
@@ -86,10 +86,18 @@ pub(crate) async fn volume_pot_task(
             if data != last_midi {
                 last_midi = data;
                 send_midi(MidiMsg::ControlChange {
-                    cc: if channel == 0 { 0x00 } else { 0x01 },
+                    cc: match channel {
+                        Some(0) => 0x00,
+                        Some(1) => 0x01,
+                        _ => 0x10,
+                    },
                     value: data,
                 });
-                send_display(DisplayCmd::DrawPot(data, channel));
+
+                match channel {
+                    Some(0..=1) => send_display(DisplayCmd::DrawPot(data, channel.unwrap())),
+                    _ => send_display(DisplayCmd::DrawGain(data)),
+                }
             }
         }
 
